@@ -96,6 +96,13 @@
     /* Modals */
     .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: flex; align-items: center; justify-content: center; z-index: 999; padding: 16px; }
     .modal-box { background: var(--panel); border: 1px solid var(--panelLine); border-radius: 8px; width: 100%; max-width: 580px; padding: 18px; max-height: 90vh; overflow-y: auto; }
+
+    /* Layout Lock / Drag-to-Reorder */
+    .layout-unlock-banner { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--goldDim); border: 1px solid var(--gold); color: var(--gold); font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; }
+    .card.layout-draggable { cursor: grab; border-style: dashed; border-color: var(--gold); position: relative; }
+    .card.layout-draggable::before { content: "⠿ Drag to reorder"; display: block; font-size: 10px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: var(--gold); margin-bottom: 8px; user-select: none; }
+    .card.layout-draggable:active { cursor: grabbing; }
+    .card.dragging { opacity: 0.4; }
   </style>
 </head>
 <body>
@@ -166,6 +173,7 @@
     const BRANDING_STORAGE_KEY = "mat-scout-branding-v8";
     const COLOR_THEME_STORAGE_KEY = "mat-scout-color-theme-v8";
     const API_KEY_STORAGE = "mat-scout-gemini-api-key";
+    const LAYOUT_STORAGE_KEY = "mat-scout-layout-order-v1";
     const SAMPLE_SEASON_ID = "season_sample_2026";
 
     const DEFAULT_WEIGHT_CLASSES = {
@@ -314,9 +322,14 @@
     let youtubeVideoId = null;
     let ytPlayer = null;
     let ytApiReady = false;
+    let ytLoadedVideoId = null;
 
     let parsedEvents = null;
     let selectedEvents = {};
+
+    let uiUnlocked = false;
+    let layoutOrder = {};
+    let draggedCardEl = null;
 
     function onYouTubeIframeAPIReady() {
       ytApiReady = true;
@@ -341,6 +354,9 @@
           customTheme = JSON.parse(savedTheme);
           applyTheme(customTheme);
         }
+
+        const savedLayout = localStorage.getItem(LAYOUT_STORAGE_KEY);
+        if (savedLayout) layoutOrder = JSON.parse(savedLayout);
 
         applyBranding(branding);
 
@@ -373,6 +389,7 @@
         localStorage.setItem(WEIGHT_CLASSES_STORAGE_KEY, JSON.stringify(weightClasses));
         localStorage.setItem(BRANDING_STORAGE_KEY, JSON.stringify(branding));
         localStorage.setItem(COLOR_THEME_STORAGE_KEY, JSON.stringify(customTheme));
+        localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(layoutOrder));
       } catch (err) {}
     }
 
@@ -487,10 +504,14 @@
           height: '100%',
           width: '100%',
           videoId: videoId,
-          playerVars: { 'playsinline': 1, 'rel': 0 }
+          playerVars: { 'playsinline': 1, 'rel': 0 },
+          events: {
+            'onReady': () => { ytLoadedVideoId = videoId; }
+          }
         });
-      } else if (ytPlayer && ytPlayer.loadVideoById) {
+      } else if (ytPlayer && ytPlayer.loadVideoById && videoId !== ytLoadedVideoId) {
         ytPlayer.cueVideoById(videoId);
+        ytLoadedVideoId = videoId;
       }
     }
 
@@ -628,7 +649,118 @@
       if (currentTab === "plan") renderPlan(container);
       if (currentTab === "admin") renderAdmin(container);
 
+      if (uiUnlocked && container && currentTab !== "admin") {
+        const banner = document.createElement("div");
+        banner.className = "layout-unlock-banner";
+        banner.innerHTML = `<span>🔓 Layout unlocked — drag any card to rearrange this page</span><button class="btn-back" onclick="toggleUILock()">Lock Layout</button>`;
+        container.insertBefore(banner, container.firstChild);
+      }
+
+      applyLayoutOrder();
       renderModal();
+    }
+
+    /* LAYOUT LOCK / DRAG-TO-REORDER
+       Works generically on whatever top-level .card blocks a tab renders —
+       no changes needed to individual renderX() functions. Order is tracked
+       by tagging each card with its original render-order index, then
+       persisting the desired order per tab. */
+    function toggleUILock() {
+      uiUnlocked = !uiUnlocked;
+      render();
+    }
+
+    function resetTabLayout(tabKey) {
+      if (!confirm(`Reset the ${tabKey} tab back to its default layout?`)) return;
+      delete layoutOrder[tabKey];
+      persist();
+      render();
+    }
+
+    function applyLayoutOrder() {
+      const target = document.getElementById("tab-content");
+      if (!target) return;
+      const cards = Array.from(target.children).filter(el => el.classList.contains("card"));
+      cards.forEach((el, i) => { el.dataset.cardIdx = i; });
+
+      const key = currentTab;
+      let order = layoutOrder[key];
+      if (!order || order.length !== cards.length) {
+        order = cards.map((_, i) => i);
+        layoutOrder[key] = order;
+      }
+
+      order.forEach(idx => {
+        const el = cards[idx];
+        if (el) target.appendChild(el);
+      });
+
+      const orderedEls = Array.from(target.children).filter(el => el.classList.contains("card"));
+      orderedEls.forEach(el => {
+        el.classList.toggle("layout-draggable", uiUnlocked && cards.length > 1);
+        el.draggable = uiUnlocked && cards.length > 1;
+        el.removeEventListener("dragstart", onCardDragStart);
+        el.removeEventListener("dragover", onCardDragOver);
+        el.removeEventListener("drop", onCardDrop);
+        el.removeEventListener("dragend", onCardDragEnd);
+        if (uiUnlocked) {
+          el.addEventListener("dragstart", onCardDragStart);
+          el.addEventListener("dragover", onCardDragOver);
+          el.addEventListener("drop", onCardDrop);
+          el.addEventListener("dragend", onCardDragEnd);
+        }
+      });
+    }
+
+    function onCardDragStart(e) {
+      draggedCardEl = e.currentTarget;
+      e.currentTarget.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      try { e.dataTransfer.setData("text/plain", ""); } catch (err) {}
+    }
+
+    function onCardDragOver(e) {
+      e.preventDefault();
+      if (!draggedCardEl) return;
+      const container = document.getElementById("tab-content");
+      const afterEl = getDragAfterElement(container, e.clientY);
+      if (afterEl == null) {
+        container.appendChild(draggedCardEl);
+      } else if (afterEl !== draggedCardEl) {
+        container.insertBefore(draggedCardEl, afterEl);
+      }
+    }
+
+    function getDragAfterElement(container, y) {
+      const els = Array.from(container.querySelectorAll(".card:not(.dragging)"));
+      return els.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) {
+          return { offset, element: child };
+        }
+        return closest;
+      }, { offset: Number.NEGATIVE_INFINITY, element: null }).element;
+    }
+
+    function onCardDrop(e) {
+      e.preventDefault();
+      saveCurrentCardOrder();
+    }
+
+    function onCardDragEnd(e) {
+      e.currentTarget.classList.remove("dragging");
+      draggedCardEl = null;
+      saveCurrentCardOrder();
+    }
+
+    function saveCurrentCardOrder() {
+      const target = document.getElementById("tab-content");
+      if (!target) return;
+      const cards = Array.from(target.children).filter(el => el.classList.contains("card"));
+      const order = cards.map(el => Number(el.dataset.cardIdx));
+      layoutOrder[currentTab] = order;
+      persist();
     }
 
     /* SAMPLE SEASON GENERATOR */
@@ -2028,7 +2160,39 @@
     let draggedMove = null;
 
     function renderAdmin(target) {
+      const tabsWithCards = [
+        { key: "roster", label: "Roster" },
+        { key: "scout", label: "Scout" },
+        { key: "sheet", label: "Bout Sheet" },
+        { key: "stats", label: "Stats" },
+        { key: "plan", label: "Training Plan" }
+      ];
+
       target.innerHTML = `
+        <!-- Screen Layout Lock -->
+        <div class="card">
+          <div class="card-title">Screen Layout</div>
+          <p style="font-size:12px; color:var(--muted); margin-bottom:10px;">
+            Unlock to drag and rearrange the cards on the Roster, Scout, Bout Sheet, Stats, and Training Plan pages to set them up how you like. Lock it back when you're done so nothing shifts by accident during a match.
+          </p>
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <button class="btn ${uiUnlocked ? 'btn-red' : 'btn-green'}" onclick="toggleUILock()">
+              ${uiUnlocked ? '🔓 Unlocked — Click to Lock' : '🔒 Locked — Click to Unlock'}
+            </button>
+            <span style="font-size:11px; color:var(--muted);">${uiUnlocked ? 'Cards can be dragged on other pages right now.' : 'Layout is locked. Cards will not move.'}</span>
+          </div>
+          ${uiUnlocked ? `
+            <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--panelLine);">
+              <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Reset a page back to its default layout</label>
+              <div class="grid-3" style="margin-top:6px;">
+                ${tabsWithCards.map(t => `
+                  <button class="btn" style="background:var(--panelLine); color:var(--chalk); font-size:10px;" onclick="resetTabLayout('${t.key}')">Reset ${t.label}</button>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+        </div>
+
         <!-- Team Branding Customizer -->
         <div class="card">
           <div class="card-title">Team Name & Branding</div>
