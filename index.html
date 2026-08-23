@@ -49,7 +49,7 @@
     .tab-btn.active { background-color: var(--gold); color: var(--mat); }
 
     /* Cards & Elements */
-    .card { background-color: var(--panel); border: 1px solid var(--panelLine); border-radius: 6px; padding: 16px; margin-bottom: 12px; }
+    .card { background-color: var(--panel); border: 1px solid var(--panelLine); border-radius: 6px; padding: 16px; margin-bottom: 12px; position: relative; }
     .card-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: var(--gold); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
     .input, .select, .textarea { width: 100%; padding: 8px 12px; background-color: var(--mat); color: var(--chalk); border: 1px solid var(--panelLine); border-radius: 4px; font-size: 13px; outline: none; margin-bottom: 8px; }
     
@@ -61,6 +61,10 @@
     .btn-back { background-color: var(--goldDim); border: 1px solid var(--gold); color: var(--gold); font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 4px; cursor: pointer; text-transform: uppercase; }
     .btn-back:hover { background-color: var(--gold); color: var(--mat); }
     .btn-remove-video { background-color: var(--redDim); border: 1px solid var(--red); color: var(--red); font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 4px; cursor: pointer; text-transform: uppercase; }
+    
+    /* Help Icon Button */
+    .help-btn { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: var(--panelLine); color: var(--muted); font-size: 11px; font-weight: 800; border: 1px solid var(--muted); cursor: pointer; user-select: none; margin-left: 6px; line-height: 1; vertical-align: middle; transition: 0.15s ease; }
+    .help-btn:hover { background: var(--goldDim); border-color: var(--gold); color: var(--gold); }
 
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
@@ -76,6 +80,8 @@
     
     .chip { font-size: 10px; font-weight: 700; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--panelLine); background: var(--mat); color: var(--muted); cursor: pointer; text-transform: uppercase; text-align: center; user-select: none; }
     .chip.selected { background: var(--goldDim); border-color: var(--gold); color: var(--gold); }
+    .chip.selected-wrestler { background: var(--greenDim); border-color: var(--green); color: var(--green); }
+    .chip.selected-opponent { background: var(--redDim); border-color: var(--red); color: var(--red); }
     .chip:disabled, .chip.disabled { opacity: 0.35; cursor: not-allowed; }
 
     .draggable-item { cursor: grab; }
@@ -142,24 +148,6 @@
       <button class="tab-btn" onclick="switchTab('admin')">Admin</button>
     </div>
 
-    <!-- Persistent Global Video Player Container -->
-    <div id="global-video-card" class="card" style="display:none; padding-bottom:10px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-        <div id="global-video-title" class="card-title" style="margin-bottom:0;">Match Video Player</div>
-        <button class="btn-remove-video" onclick="clearSharedVideo()">✕ Remove Video</button>
-      </div>
-      
-      <!-- Native MP4 Video Player -->
-      <video id="persistent-video" controls style="display:none;"></video>
-      
-      <!-- YouTube Video Embed Container -->
-      <div id="yt-player-container" class="yt-wrapper" style="display:none;">
-        <div id="yt-player-target"></div>
-      </div>
-      
-      <div style="font-size:11px; color:var(--muted);">Video pauses automatically when tagging moves. Click timestamps in the log to seek.</div>
-    </div>
-
     <div id="tab-content"></div>
   </div>
 
@@ -182,7 +170,6 @@
     };
 
     const DEFAULT_TAXONOMY = {
-      alphabetize: false,
       MOVE_GROUPS: {
         "Takedown": {
           "Shots": ["Single Leg", "Double Leg", "High Crotch", "Ankle Pick", "Fireman's Carry", "Dresser Dump"],
@@ -193,13 +180,16 @@
           "Other": ["Standing Cradle", "Undefined"]
         },
         "Escape": ["Stand-Up", "Switch", "Sit-Out"],
-        "Reversal": ["Standing Switch", "Roll", "Switch", "Granby Roll"],
+        "Reversal": ["Standing Switch", "Roll", "Switch", "Granby Roll", "Peterson", "Out the Back", "Head Hook", "Arm Hook"],
         "Turns": ["Half", "Arm Bar", "Over/Under", "2 on 1 Tilt"],
         "Near Fall / Pin": ["2-Point NF", "3-Point NF", "4-Point NF", "Pin / Fall"],
         "Penalty": ["Full Nelson", "Locked Hands", "Illegal Move", "Stalling", "Unsportsmanlike"]
       },
       TIE_MODIFIERS: [
-        "Overhook", "Underhook", "Over/Under", "Collar Tie", "Inside Tie", "Outside Tie", "Over Tie", "Wrist Control", "Elbow Control", "Russian", "2 on 1"
+        "Fake", "Overhook", "Underhook", "Over/Under", "Collar Tie", "Inside Tie", "Outside Tie", "Over Tie", "Wrist Control", "Elbow Control", "Russian", "Wrist Pass", "Arm Drag", "2 on 1", "Poor Penetration"
+      ],
+      FINISH_MODIFIERS: [
+        "Inside Trip", "Outside Trip", "Crack Down", "Backside Finish", "Cut to Double", "Dump", "Scramble", "Down Block", "Sprawl", "Whizzer", "Crossface", "Mat Return", "Cut Loose"
       ]
     };
 
@@ -211,6 +201,7 @@
       "Sprawl Go Behind": 3, "Leg Elevator": 3, "Broomstick": 3, "Headlock Roll Through": 3, "Spladle": 3,
       "Standing Cradle": 3, "Undefined": 3,
       "Stand-Up": 1, "Switch": 2, "Sit-Out": 1, "Standing Switch": 2, "Roll": 2, "Granby Roll": 2,
+      "Peterson": 2, "Out the Back": 2, "Head Hook": 2, "Arm Hook": 2,
       "2-Point NF": 2, "3-Point NF": 3, "4-Point NF": 4, "Pin / Fall": 0,
       "Half": 0, "Arm Bar": 0, "Over/Under": 0, "2 on 1 Tilt": 0,
       "Full Nelson": 0, "Locked Hands": 0, "Illegal Move": 0, "Stalling": 0, "Unsportsmanlike": 0
@@ -245,7 +236,11 @@
       "Sit-Out": "Sit-out-to-turn reps, base recovery, re-shots after sit-out",
       "Standing Switch": "Standing switch timing off underhook defense",
       "Roll": "Roll-through counters, hip heist to control",
-      "Granby Roll": "Shoulder rolls from referee's bottom position, clearing hips"
+      "Granby Roll": "Shoulder rolls from referee's bottom position, clearing hips",
+      "Peterson": "Peterson roll from bottom referee's position, leg hook leverage to back exposure",
+      "Out the Back": "Clearing the hips and driving out the back against front headlocks or high crotch",
+      "Head Hook": "Head hook reversal counter, trapping head and rolling through",
+      "Arm Hook": "Arm hook roll-through reversal, trapping overhook and switching hips"
     };
 
     let store = {
@@ -296,6 +291,8 @@
     let selectedSubCat = null;
     let selectedPendingMove = null;
     let activeTieModifiers = [];
+    let modifierAssignTarget = "wrestler";
+    let modifierSubView = "ties";
     let currentPeriod = "P1";
 
     let editingEvent = null;
@@ -303,6 +300,9 @@
     let editingBout = null;
     let expandedStatMove = null;
     let expandedDefStatMove = null;
+    let statsShowTeam = false;
+    let activeProficiencyDetail = null;
+    let activeHelpTopic = null;
 
     let boutFormBuffer = {
       date: new Date().toISOString().slice(0, 10),
@@ -330,6 +330,7 @@
     let uiUnlocked = false;
     let layoutOrder = {};
     let draggedCardEl = null;
+    let videoCardEl = null;
 
     function onYouTubeIframeAPIReady() {
       ytApiReady = true;
@@ -341,7 +342,20 @@
         if (savedStore) store = JSON.parse(savedStore);
         
         const savedTax = localStorage.getItem(TAXONOMY_STORAGE_KEY);
-        if (savedTax) taxonomy = JSON.parse(savedTax);
+        if (savedTax) {
+          taxonomy = JSON.parse(savedTax);
+          if (taxonomy.alphabetize !== undefined) delete taxonomy.alphabetize;
+          if (!taxonomy.FINISH_MODIFIERS) taxonomy.FINISH_MODIFIERS = [...DEFAULT_TAXONOMY.FINISH_MODIFIERS];
+          if (!taxonomy.TIE_MODIFIERS.includes("Fake")) taxonomy.TIE_MODIFIERS.unshift("Fake");
+          if (!taxonomy.TIE_MODIFIERS.includes("Wrist Pass")) taxonomy.TIE_MODIFIERS.push("Wrist Pass");
+          if (!taxonomy.TIE_MODIFIERS.includes("Arm Drag")) taxonomy.TIE_MODIFIERS.push("Arm Drag");
+          if (!taxonomy.TIE_MODIFIERS.includes("Poor Penetration")) taxonomy.TIE_MODIFIERS.push("Poor Penetration");
+
+          const revs = taxonomy.MOVE_GROUPS.Reversal;
+          ["Peterson", "Out the Back", "Head Hook", "Arm Hook"].forEach(m => {
+            if (!revs.includes(m)) revs.push(m);
+          });
+        }
 
         const savedWeights = localStorage.getItem(WEIGHT_CLASSES_STORAGE_KEY);
         if (savedWeights) weightClasses = JSON.parse(savedWeights);
@@ -471,29 +485,21 @@
     }
 
     function syncVideoPlayerVisibility() {
-      const card = document.getElementById("global-video-card");
-      const title = document.getElementById("global-video-title");
       const vid = document.getElementById("persistent-video");
       const ytContainer = document.getElementById("yt-player-container");
+      const title = document.getElementById("global-video-title");
+      if (title) title.textContent = `Match Video Player: ${videoFileName || 'YouTube Footage'}`;
 
-      const hasVideo = (videoSourceType === "file" && videoBlobUrl) || (videoSourceType === "youtube" && youtubeVideoId);
-      const shouldShow = hasVideo && (currentTab === "scout");
-
-      if (card) {
-        card.style.display = shouldShow ? "block" : "none";
-        if (title) title.textContent = `Match Video Player: ${videoFileName || 'YouTube Footage'}`;
-        
-        if (videoSourceType === "file") {
-          if (vid) {
-            vid.style.display = "block";
-            if (vid.src !== videoBlobUrl) vid.src = videoBlobUrl || "";
-          }
-          if (ytContainer) ytContainer.style.display = "none";
-        } else if (videoSourceType === "youtube") {
-          if (vid) vid.style.display = "none";
-          if (ytContainer) ytContainer.style.display = "block";
-          initOrUpdateYouTubePlayer(youtubeVideoId);
+      if (videoSourceType === "file") {
+        if (vid) {
+          vid.style.display = "block";
+          if (vid.src !== videoBlobUrl) vid.src = videoBlobUrl || "";
         }
+        if (ytContainer) ytContainer.style.display = "none";
+      } else if (videoSourceType === "youtube") {
+        if (vid) vid.style.display = "none";
+        if (ytContainer) ytContainer.style.display = "block";
+        initOrUpdateYouTubePlayer(youtubeVideoId);
       }
     }
 
@@ -633,7 +639,6 @@
     function render() {
       applyBranding(branding);
       renderScopeSelectors();
-      syncVideoPlayerVisibility();
       
       const badge = document.getElementById("active-wrestler-display");
       const activeW = getActiveWrestler();
@@ -657,14 +662,11 @@
       }
 
       applyLayoutOrder();
+      syncVideoPlayerVisibility();
       renderModal();
     }
 
-    /* LAYOUT LOCK / DRAG-TO-REORDER
-       Works generically on whatever top-level .card blocks a tab renders —
-       no changes needed to individual renderX() functions. Order is tracked
-       by tagging each card with its original render-order index, then
-       persisting the desired order per tab. */
+    /* LAYOUT LOCK / DRAG-TO-REORDER */
     function toggleUILock() {
       uiUnlocked = !uiUnlocked;
       render();
@@ -763,6 +765,29 @@
       persist();
     }
 
+    /* HELP SYSTEM */
+    const HELP_CONTENT = {
+      "roster_athletes": "Add and manage athletes on your active roster. Select an athlete to set them as the active focus across scoring, statistics, and individual training plans.",
+      "roster_events": "Schedule dual meets and tournaments. Bouts allow you to scope all analytics and scoring to a single opponent or view season-wide totals.",
+      "scout_manual": "Interactive real-time scoring pad. Track offensive and defensive executions, set position choices at period breaks, and tag ties, setups, and finishes for full root-cause analysis.",
+      "scout_modifiers": "Modifiers let you record setup ties and finish mechanics for each action. Toggle between 'Ties & Setups' and 'Finishes' and apply them specifically to your wrestler (green) or the opponent (red).",
+      "bout_sheet": "Official dual meet and individual season match ledger. Finalizing dual meets automatically logs team score and updates your overall dual season record.",
+      "stats_proficiency": "Positional Proficiency calculates net effectiveness: (Successes - Failures) / Opportunities in Neutral, Top, and Bottom. Choice preferences show how often your athlete picks each position.",
+      "stats_efficiency": "Technique efficiency charts broken down symmetrically for offensive execution and defensive resistance. Click any move to inspect which ties led to success or failure.",
+      "plan_remediation": "Prescriptive drilling matrix. Gaps are surfaced when an athlete converts or defends under 50% on frequent techniques, linking directly to setup remediation drills.",
+      "admin_ui": "Customize application appearance, branding colors, fonts, and unlock the drag-to-reorder interface to configure each dashboard view."
+    };
+
+    function showHelp(topicKey) {
+      activeHelpTopic = topicKey;
+      activeModal = "help";
+      renderModal();
+    }
+
+    function helpIcon(topicKey) {
+      return `<button class="help-btn" title="View Explanation" onclick="event.stopPropagation(); showHelp('${topicKey}')">?</button>`;
+    }
+
     /* SAMPLE SEASON GENERATOR */
     function isSampleSeasonLoaded() {
       return store.seasons.some(s => s.id === SAMPLE_SEASON_ID);
@@ -803,7 +828,6 @@
         { id: "b285", name: "Derek Briggs", weightClass: "285", division: "Boys", level: "Varsity", grade: "12" }
       ];
 
-      // 14 Girls Weights (including 190 and 235)
       const girlsRoster = [
         { id: "g100", name: "Mia Santos", weightClass: "100", division: "Girls", level: "Varsity", grade: "9" },
         { id: "g105", name: "Chloe Bennett", weightClass: "105", division: "Girls", level: "Varsity", grade: "10" },
@@ -826,7 +850,7 @@
         date: "2026-01-14",
         type: "Dual",
         division: "Boys",
-        opponentTeam: "Desert Ridge High",
+        opponentTeam: "Sample Boys Dual",
         finalized: false,
         opponentRoster: [
           { name: "C. Jones", weightClass: "106", grade: "9" },
@@ -851,7 +875,7 @@
         date: "2026-01-21",
         type: "Dual",
         division: "Girls",
-        opponentTeam: "Canyon Springs",
+        opponentTeam: "Sample Girls Dual",
         finalized: false,
         opponentRoster: [
           { name: "S. Clark", weightClass: "100", grade: "9" },
@@ -876,7 +900,7 @@
         date: "2026-02-07",
         type: "Tournament",
         division: "Boys",
-        opponentTeam: "High Desert Invitational (Rd 1)",
+        opponentTeam: "Sample Tournament",
         finalized: false,
         opponentRoster: [
           { name: "J. Myers (Palmdale)", weightClass: "106", grade: "9" },
@@ -897,24 +921,16 @@
       };
 
       const sampleMatches = [
-        {
-          id: "m_rivera_1",
-          wrestlerId: "b120",
-          boutId: "bout_dual_boys",
-          opponent: "K. Taylor",
-          level: "Varsity",
-          date: "2026-01-14",
-          source: "manual"
-        },
-        {
-          id: "m_santos_1",
-          wrestlerId: "g100",
-          boutId: "bout_dual_girls",
-          opponent: "S. Clark",
-          level: "Varsity",
-          date: "2026-01-21",
-          source: "manual"
-        }
+        { id: "m_rivera_1", wrestlerId: "b120", boutId: "bout_dual_boys", opponent: "K. Taylor", level: "Varsity", date: "2026-01-14", source: "manual" },
+        { id: "m_vance_1", wrestlerId: "b106", boutId: "bout_dual_boys", opponent: "C. Jones", level: "Varsity", date: "2026-01-14", source: "manual" },
+        { id: "m_hayes_1", wrestlerId: "b113", boutId: "bout_dual_boys", opponent: "D. Smith", level: "Varsity", date: "2026-01-14", source: "manual" },
+        { id: "m_brooks_1", wrestlerId: "b132", boutId: "bout_dual_boys", opponent: "J. Adams", level: "Varsity", date: "2026-01-14", source: "manual" },
+        { id: "m_vega_1", wrestlerId: "b144", boutId: "bout_dual_boys", opponent: "R. Nelson", level: "Varsity", date: "2026-01-14", source: "manual" },
+        { id: "m_torres_1", wrestlerId: "b157", boutId: "bout_dual_boys", opponent: "T. Young", level: "Varsity", date: "2026-01-14", source: "manual" },
+        { id: "m_cooper_1", wrestlerId: "b175", boutId: "bout_dual_boys", opponent: "S. King", level: "Varsity", date: "2026-01-14", source: "manual" },
+        { id: "m_patterson_1", wrestlerId: "b150", boutId: "bout_tourney", opponent: "K. Bowen (Antelope Valley)", level: "Varsity", date: "2026-02-07", source: "manual" },
+        { id: "m_miller_1", wrestlerId: "b138", boutId: "bout_tourney", opponent: "B. Vance (Quartz Hill)", level: "Varsity", date: "2026-02-07", source: "manual" },
+        { id: "m_santos_1", wrestlerId: "g100", boutId: "bout_dual_girls", opponent: "S. Clark", level: "Varsity", date: "2026-01-21", source: "manual" }
       ];
 
       const sampleEvents = [
@@ -923,13 +939,73 @@
         { id: "e3", matchId: "m_rivera_1", wrestlerId: "b120", boutId: "bout_dual_boys", period: "P2", category: "Choice", move: "Home Choice: Bottom", direction: "offense", outcome: "success", points: 0, detail: "Bottom", timestamp: "02:00", ts: Date.now() },
         { id: "e4", matchId: "m_rivera_1", wrestlerId: "b120", boutId: "bout_dual_boys", period: "P2", category: "Escape", move: "Switch", tie: "Inside Tie", direction: "offense", outcome: "success", points: 2, timestamp: "02:22", ts: Date.now() },
         { id: "e5", matchId: "m_rivera_1", wrestlerId: "b120", boutId: "bout_dual_boys", period: "P2", category: "Near Fall / Pin", move: "3-Point NF", tie: "2 on 1", direction: "offense", outcome: "success", points: 3, detail: "3-Point NF", timestamp: "03:15", ts: Date.now() },
+        { id: "e_riv6", matchId: "m_rivera_1", wrestlerId: "b120", boutId: "bout_dual_boys", period: "P3", category: "Takedown", move: "Single Leg", tie: "Underhook", direction: "offense", outcome: "fail", points: 0, timestamp: "03:50", ts: Date.now() },
+        { id: "e_riv7", matchId: "m_rivera_1", wrestlerId: "b120", boutId: "bout_dual_boys", period: "P3", category: "Takedown", move: "Single Leg", tie: "Underhook", direction: "offense", outcome: "fail", points: 0, timestamp: "04:20", ts: Date.now() },
+        { id: "e_riv8", matchId: "m_rivera_1", wrestlerId: "b120", boutId: "bout_dual_boys", period: "P3", category: "Escape", move: "Stand-Up", tie: "Wrist Control", direction: "defense", outcome: "fail", points: 1, timestamp: "04:45", ts: Date.now() },
+
+        { id: "e_van1", matchId: "m_vance_1", wrestlerId: "b106", boutId: "bout_dual_boys", period: "P1", category: "Takedown", move: "Double Leg", tie: "Collar Tie", direction: "offense", outcome: "success", points: 3, timestamp: "00:28", ts: Date.now() },
+        { id: "e_van2", matchId: "m_vance_1", wrestlerId: "b106", boutId: "bout_dual_boys", period: "P1", category: "Escape", move: "Stand-Up", tie: "Wrist Control", direction: "defense", outcome: "fail", points: 1, timestamp: "01:05", ts: Date.now() },
+        { id: "e_van3", matchId: "m_vance_1", wrestlerId: "b106", boutId: "bout_dual_boys", period: "P2", category: "Takedown", move: "Double Leg", tie: "Collar Tie", direction: "offense", outcome: "success", points: 3, timestamp: "02:10", ts: Date.now() },
+        { id: "e_van4", matchId: "m_vance_1", wrestlerId: "b106", boutId: "bout_dual_boys", period: "P2", category: "Escape", move: "Stand-Up", tie: "Wrist Control", direction: "defense", outcome: "fail", points: 1, timestamp: "02:55", ts: Date.now() },
+        { id: "e_van5", matchId: "m_vance_1", wrestlerId: "b106", boutId: "bout_dual_boys", period: "P2", category: "Near Fall / Pin", move: "2-Point NF", tie: "Overhook", direction: "offense", outcome: "success", points: 2, timestamp: "03:20", ts: Date.now() },
+        { id: "e_van6", matchId: "m_vance_1", wrestlerId: "b106", boutId: "bout_dual_boys", period: "P3", category: "Takedown", move: "Double Leg", tie: "Collar Tie", direction: "offense", outcome: "fail", points: 0, timestamp: "04:10", ts: Date.now() },
+
+        { id: "e_hay1", matchId: "m_hayes_1", wrestlerId: "b113", boutId: "bout_dual_boys", period: "P1", category: "Takedown", move: "Double Leg", tie: "Collar Tie", direction: "offense", outcome: "fail", points: 0, timestamp: "00:40", ts: Date.now() },
+        { id: "e_hay2", matchId: "m_hayes_1", wrestlerId: "b113", boutId: "bout_dual_boys", period: "P1", category: "Takedown", move: "Ankle Pick", tie: "Wrist Control", direction: "defense", outcome: "fail", points: 3, timestamp: "01:30", ts: Date.now() },
+        { id: "e_hay3", matchId: "m_hayes_1", wrestlerId: "b113", boutId: "bout_dual_boys", period: "P2", category: "Takedown", move: "Double Leg", tie: "Inside Tie", direction: "offense", outcome: "fail", points: 0, timestamp: "02:05", ts: Date.now() },
+        { id: "e_hay4", matchId: "m_hayes_1", wrestlerId: "b113", boutId: "bout_dual_boys", period: "P2", category: "Takedown", move: "Ankle Pick", tie: "Wrist Control", direction: "defense", outcome: "fail", points: 3, timestamp: "02:50", ts: Date.now() },
+        { id: "e_hay5", matchId: "m_hayes_1", wrestlerId: "b113", boutId: "bout_dual_boys", period: "P2", category: "Escape", move: "Stand-Up", direction: "offense", outcome: "success", points: 1, timestamp: "03:10", ts: Date.now() },
+        { id: "e_hay6", matchId: "m_hayes_1", wrestlerId: "b113", boutId: "bout_dual_boys", period: "P3", category: "Takedown", move: "Double Leg", tie: "Underhook", direction: "offense", outcome: "success", points: 3, timestamp: "04:00", ts: Date.now() },
+        { id: "e_hay7", matchId: "m_hayes_1", wrestlerId: "b113", boutId: "bout_dual_boys", period: "P3", category: "Takedown", move: "Ankle Pick", tie: "Wrist Control", direction: "defense", outcome: "fail", points: 3, timestamp: "04:40", ts: Date.now() },
+
+        { id: "e_bro1", matchId: "m_brooks_1", wrestlerId: "b132", boutId: "bout_dual_boys", period: "P1", category: "Takedown", move: "Snap Down", tie: "Collar Tie", direction: "defense", outcome: "fail", points: 3, timestamp: "00:35", ts: Date.now() },
+        { id: "e_bro2", matchId: "m_brooks_1", wrestlerId: "b132", boutId: "bout_dual_boys", period: "P1", category: "Escape", move: "Switch", tie: "Inside Tie", direction: "offense", outcome: "success", points: 2, timestamp: "01:15", ts: Date.now() },
+        { id: "e_bro3", matchId: "m_brooks_1", wrestlerId: "b132", boutId: "bout_dual_boys", period: "P2", category: "Takedown", move: "Fireman's Carry", tie: "Overhook", direction: "offense", outcome: "success", points: 3, timestamp: "02:00", ts: Date.now() },
+        { id: "e_bro4", matchId: "m_brooks_1", wrestlerId: "b132", boutId: "bout_dual_boys", period: "P2", category: "Takedown", move: "Snap Down", tie: "Collar Tie", direction: "defense", outcome: "fail", points: 3, timestamp: "02:40", ts: Date.now() },
+        { id: "e_bro5", matchId: "m_brooks_1", wrestlerId: "b132", boutId: "bout_dual_boys", period: "P2", category: "Near Fall / Pin", move: "4-Point NF", tie: "Over/Under", direction: "offense", outcome: "success", points: 4, timestamp: "03:05", ts: Date.now() },
+        { id: "e_bro6", matchId: "m_brooks_1", wrestlerId: "b132", boutId: "bout_dual_boys", period: "P3", category: "Near Fall / Pin", move: "Pin / Fall", direction: "offense", outcome: "success", points: 0, detail: "Pin / Fall", timestamp: "03:40", ts: Date.now() },
+
+        { id: "e_veg1", matchId: "m_vega_1", wrestlerId: "b144", boutId: "bout_dual_boys", period: "P1", category: "Takedown", move: "Front Headlock", tie: "Collar Tie", direction: "defense", outcome: "fail", points: 3, timestamp: "00:30", ts: Date.now() },
+        { id: "e_veg2", matchId: "m_vega_1", wrestlerId: "b144", boutId: "bout_dual_boys", period: "P1", category: "Escape", move: "Stand-Up", direction: "offense", outcome: "success", points: 1, timestamp: "01:00", ts: Date.now() },
+        { id: "e_veg3", matchId: "m_vega_1", wrestlerId: "b144", boutId: "bout_dual_boys", period: "P2", category: "Takedown", move: "Front Headlock", tie: "Collar Tie", direction: "defense", outcome: "fail", points: 3, timestamp: "01:50", ts: Date.now() },
+        { id: "e_veg4", matchId: "m_vega_1", wrestlerId: "b144", boutId: "bout_dual_boys", period: "P2", category: "Near Fall / Pin", move: "2-Point NF", direction: "defense", outcome: "fail", points: 2, timestamp: "02:20", ts: Date.now() },
+        { id: "e_veg5", matchId: "m_vega_1", wrestlerId: "b144", boutId: "bout_dual_boys", period: "P3", category: "Near Fall / Pin", move: "Pin / Fall", direction: "defense", outcome: "fail", points: 0, detail: "Pin / Fall", timestamp: "03:15", ts: Date.now() },
+
+        { id: "e_tor1", matchId: "m_torres_1", wrestlerId: "b157", boutId: "bout_dual_boys", period: "P1", category: "Takedown", move: "High Crotch", tie: "Underhook", direction: "offense", outcome: "success", points: 3, timestamp: "00:25", ts: Date.now() },
+        { id: "e_tor2", matchId: "m_torres_1", wrestlerId: "b157", boutId: "bout_dual_boys", period: "P1", category: "Takedown", move: "High Crotch", tie: "Underhook", direction: "offense", outcome: "success", points: 3, timestamp: "01:10", ts: Date.now() },
+        { id: "e_tor3", matchId: "m_torres_1", wrestlerId: "b157", boutId: "bout_dual_boys", period: "P2", category: "Near Fall / Pin", move: "3-Point NF", tie: "2 on 1", direction: "offense", outcome: "success", points: 3, timestamp: "01:55", ts: Date.now() },
+        { id: "e_tor4", matchId: "m_torres_1", wrestlerId: "b157", boutId: "bout_dual_boys", period: "P2", category: "Escape", move: "Switch", tie: "Inside Tie", direction: "offense", outcome: "fail", points: 0, timestamp: "02:30", ts: Date.now() },
+        { id: "e_tor5", matchId: "m_torres_1", wrestlerId: "b157", boutId: "bout_dual_boys", period: "P2", category: "Escape", move: "Switch", tie: "Inside Tie", direction: "offense", outcome: "fail", points: 0, timestamp: "03:00", ts: Date.now() },
+        { id: "e_tor6", matchId: "m_torres_1", wrestlerId: "b157", boutId: "bout_dual_boys", period: "P3", category: "Takedown", move: "High Crotch", tie: "Underhook", direction: "offense", outcome: "success", points: 3, timestamp: "03:40", ts: Date.now() },
+
+        { id: "e_coo1", matchId: "m_cooper_1", wrestlerId: "b175", boutId: "bout_dual_boys", period: "P1", category: "Takedown", move: "Fireman's Carry", tie: "Overhook", direction: "offense", outcome: "fail", points: 0, timestamp: "00:40", ts: Date.now() },
+        { id: "e_coo2", matchId: "m_cooper_1", wrestlerId: "b175", boutId: "bout_dual_boys", period: "P1", category: "Reversal", move: "Roll", direction: "defense", outcome: "fail", points: 2, timestamp: "01:20", ts: Date.now() },
+        { id: "e_coo3", matchId: "m_cooper_1", wrestlerId: "b175", boutId: "bout_dual_boys", period: "P2", category: "Takedown", move: "Fireman's Carry", tie: "Overhook", direction: "offense", outcome: "fail", points: 0, timestamp: "02:00", ts: Date.now() },
+        { id: "e_coo4", matchId: "m_cooper_1", wrestlerId: "b175", boutId: "bout_dual_boys", period: "P2", category: "Reversal", move: "Roll", direction: "defense", outcome: "fail", points: 2, timestamp: "02:35", ts: Date.now() },
+        { id: "e_coo5", matchId: "m_cooper_1", wrestlerId: "b175", boutId: "bout_dual_boys", period: "P2", category: "Escape", move: "Stand-Up", direction: "offense", outcome: "success", points: 1, timestamp: "03:00", ts: Date.now() },
+        { id: "e_coo6", matchId: "m_cooper_1", wrestlerId: "b175", boutId: "bout_dual_boys", period: "P3", category: "Takedown", move: "High Crotch", tie: "Inside Tie", direction: "offense", outcome: "success", points: 3, timestamp: "03:45", ts: Date.now() },
+        { id: "e_coo7", matchId: "m_cooper_1", wrestlerId: "b175", boutId: "bout_dual_boys", period: "P3", category: "Reversal", move: "Roll", direction: "defense", outcome: "fail", points: 2, timestamp: "04:20", ts: Date.now() },
+
+        { id: "e_pat1", matchId: "m_patterson_1", wrestlerId: "b150", boutId: "bout_tourney", period: "P1", category: "Takedown", move: "High Crotch", tie: "Wrist Control", direction: "offense", outcome: "fail", points: 0, timestamp: "00:30", ts: Date.now() },
+        { id: "e_pat2", matchId: "m_patterson_1", wrestlerId: "b150", boutId: "bout_tourney", period: "P1", category: "Takedown", move: "Double Leg", direction: "defense", outcome: "fail", points: 3, timestamp: "01:10", ts: Date.now() },
+        { id: "e_pat3", matchId: "m_patterson_1", wrestlerId: "b150", boutId: "bout_tourney", period: "P2", category: "Takedown", move: "High Crotch", tie: "Wrist Control", direction: "offense", outcome: "fail", points: 0, timestamp: "01:55", ts: Date.now() },
+        { id: "e_pat4", matchId: "m_patterson_1", wrestlerId: "b150", boutId: "bout_tourney", period: "P2", category: "Escape", move: "Stand-Up", direction: "offense", outcome: "success", points: 1, timestamp: "02:30", ts: Date.now() },
+        { id: "e_pat5", matchId: "m_patterson_1", wrestlerId: "b150", boutId: "bout_tourney", period: "P3", category: "Takedown", move: "Double Leg", direction: "defense", outcome: "fail", points: 3, timestamp: "03:10", ts: Date.now() },
+
+        { id: "e_mil1", matchId: "m_miller_1", wrestlerId: "b138", boutId: "bout_tourney", period: "P1", category: "Takedown", move: "Ankle Pick", direction: "defense", outcome: "fail", points: 3, timestamp: "00:35", ts: Date.now() },
+        { id: "e_mil2", matchId: "m_miller_1", wrestlerId: "b138", boutId: "bout_tourney", period: "P1", category: "Escape", move: "Stand-Up", direction: "offense", outcome: "success", points: 1, timestamp: "01:15", ts: Date.now() },
+        { id: "e_mil3", matchId: "m_miller_1", wrestlerId: "b138", boutId: "bout_tourney", period: "P2", category: "Takedown", move: "Snap Down", direction: "defense", outcome: "fail", points: 3, timestamp: "02:00", ts: Date.now() },
+        { id: "e_mil4", matchId: "m_miller_1", wrestlerId: "b138", boutId: "bout_tourney", period: "P2", category: "Takedown", move: "Ankle Pick", direction: "defense", outcome: "fail", points: 3, timestamp: "02:40", ts: Date.now() },
+        { id: "e_mil5", matchId: "m_miller_1", wrestlerId: "b138", boutId: "bout_tourney", period: "P3", category: "Takedown", move: "Double Leg", tie: "Inside Tie", direction: "offense", outcome: "fail", points: 0, timestamp: "03:20", ts: Date.now() },
+        { id: "e_mil6", matchId: "m_miller_1", wrestlerId: "b138", boutId: "bout_tourney", period: "P3", category: "Takedown", move: "Double Leg", tie: "Inside Tie", direction: "offense", outcome: "fail", points: 0, timestamp: "03:55", ts: Date.now() },
+
         { id: "e6", matchId: "m_santos_1", wrestlerId: "g100", boutId: "bout_dual_girls", period: "P1", category: "Takedown", move: "Double Leg", tie: "Collar Tie", direction: "offense", outcome: "success", points: 3, timestamp: "00:30", ts: Date.now() },
         { id: "e7", matchId: "m_santos_1", wrestlerId: "g100", boutId: "bout_dual_girls", period: "P1", category: "Near Fall / Pin", move: "Pin / Fall", tie: "Over/Under", direction: "offense", outcome: "success", points: 0, detail: "Pin / Fall", timestamp: "01:14", ts: Date.now() }
       ];
 
       const sampleSeasonObj = {
         id: SAMPLE_SEASON_ID,
-        name: "2025–2026 Championship Season",
+        name: "Sample Season",
         style: "Folkstyle",
         boysDualRecord: { wins: 1, losses: 0, ties: 0 },
         girlsDualRecord: { wins: 1, losses: 0, ties: 0 },
@@ -993,7 +1069,10 @@
         </div>
 
         <div class="card">
-          <div class="card-title">Add Wrestler to ${season.name}</div>
+          <div class="card-title">
+            <span>Add Wrestler to ${season.name}</span>
+            ${helpIcon('roster_athletes')}
+          </div>
           <div style="display:flex; flex-direction:column; gap:6px;">
             <div style="display:flex; gap:6px;">
               <input id="r-name" class="input" style="flex:2;" placeholder="Wrestler Name" />
@@ -1021,7 +1100,10 @@
 
         <div class="card">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-            <div class="card-title" style="margin-bottom:0;">Team Roster (${filteredRoster.length} Athletes)</div>
+            <div class="card-title" style="margin-bottom:0;">
+              <span>Team Roster (${filteredRoster.length} Athletes)</span>
+              ${helpIcon('roster_athletes')}
+            </div>
             <select class="select" style="width:auto; margin-bottom:0; font-size:11px;" onchange="rosterDivisionFilter = this.value; render();">
               <option value="All" ${rosterDivisionFilter === 'All' ? 'selected' : ''}>All Divisions</option>
               <option value="Boys" ${rosterDivisionFilter === 'Boys' ? 'selected' : ''}>Boys Only</option>
@@ -1049,7 +1131,10 @@
 
         <!-- Bouts List -->
         <div class="card">
-          <div class="card-title">Scheduled Bouts & Events (${season.bouts.length})</div>
+          <div class="card-title">
+            <span>Scheduled Bouts & Events (${season.bouts.length})</span>
+            ${helpIcon('roster_events')}
+          </div>
           ${season.bouts.length === 0 ? '<p style="color:var(--muted); font-size:12px;">No events scheduled for this season.</p>' : ''}
           ${season.bouts.map(b => `
             <div class="item-row">
@@ -1093,6 +1178,10 @@
 
     function deleteWrestler(id) {
       const season = getActiveSeason();
+      const targetW = season.roster.find(w => w.id === id);
+      const name = targetW ? targetW.name : "this athlete";
+      if (!confirm(`Are you sure you want to delete ${name}? All associated match and event records will be permanently removed.`)) return;
+
       season.roster = season.roster.filter(w => w.id !== id);
       season.matches = season.matches.filter(m => m.wrestlerId !== id);
       season.events = season.events.filter(e => e.wrestlerId !== id);
@@ -1105,6 +1194,10 @@
 
     function deleteBout(boutId) {
       const season = getActiveSeason();
+      const targetB = season.bouts.find(b => b.id === boutId);
+      const boutLabel = targetB ? `${targetB.date} vs ${targetB.opponentTeam}` : "this bout";
+      if (!confirm(`Are you sure you want to delete ${boutLabel}? All events scored in this bout will be permanently removed.`)) return;
+
       season.bouts = season.bouts.filter(b => b.id !== boutId);
       if (store.activeBoutId === boutId) store.activeBoutId = "all";
       persist();
@@ -1120,6 +1213,30 @@
       return match ? match.name : "";
     }
 
+    function getVideoCardEl() {
+      if (videoCardEl) return videoCardEl;
+      videoCardEl = document.createElement("div");
+      videoCardEl.className = "card";
+      videoCardEl.style.paddingBottom = "10px";
+      videoCardEl.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <div id="global-video-title" class="card-title" style="margin-bottom:0;">Match Video Player</div>
+          <button class="btn-remove-video" onclick="clearSharedVideo()">✕ Remove Video</button>
+        </div>
+
+        <!-- Native MP4 Video Player -->
+        <video id="persistent-video" controls style="display:none;"></video>
+
+        <!-- YouTube Video Embed Container -->
+        <div id="yt-player-container" class="yt-wrapper" style="display:none;">
+          <div id="yt-player-target"></div>
+        </div>
+
+        <div style="font-size:11px; color:var(--muted);">Video pauses automatically when tagging moves. Click timestamps in the log to seek.</div>
+      `;
+      return videoCardEl;
+    }
+
     function renderScout(target) {
       const season = getActiveSeason();
       const activeW = getActiveWrestler();
@@ -1132,10 +1249,11 @@
 
       const autoOpponent = getOpponentForActiveWrestler();
       const boutOpponents = activeBout && activeBout.opponentRoster ? activeBout.opponentRoster : [];
+      const hasLoadedVideo = (videoSourceType === "file" && videoBlobUrl) || (videoSourceType === "youtube" && youtubeVideoId);
 
       target.innerHTML = `
-        <!-- Top of Page: Athlete Selector & Mode Switcher -->
-        <div class="card" style="padding:10px 14px; margin-bottom:10px;">
+        <!-- Athlete Selector & Mode Switcher -->
+        <div class="card" style="padding:10px 14px;">
           <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
             <span style="font-size:11px; font-weight:800; color:var(--gold); text-transform:uppercase;">Athlete Under Review:</span>
             <select class="select" style="margin-bottom:0; flex:1; max-width:340px; font-size:12px; font-weight:700;" onchange="setActiveWrestler(this.value)">
@@ -1144,20 +1262,23 @@
           </div>
         </div>
 
-        <div class="grid-2" style="margin-bottom:12px;">
-          <button class="btn" style="background:${scoutMode === 'manual' ? 'var(--gold)' : 'var(--panel)'}; color:${scoutMode === 'manual' ? 'var(--mat)' : 'var(--chalk)'};" onclick="scoutMode = 'manual'; render();">
-            Manual Scoring Mode
-          </button>
-          <button class="btn" style="background:${scoutMode === 'ai' ? 'var(--gold)' : 'var(--panel)'}; color:${scoutMode === 'ai' ? 'var(--mat)' : 'var(--chalk)'};" onclick="scoutMode = 'ai'; render();">
-            AI Video Scout Mode
-          </button>
+        <!-- Mode Switch Buttons -->
+        <div class="card" style="padding:10px 14px;">
+          <div class="grid-2">
+            <button class="btn" style="background:${scoutMode === 'manual' ? 'var(--gold)' : 'var(--mat)'}; color:${scoutMode === 'manual' ? 'var(--mat)' : 'var(--chalk)'}; border:1px solid var(--panelLine);" onclick="scoutMode = 'manual'; render();">
+              Manual Scoring Mode
+            </button>
+            <button class="btn" style="background:${scoutMode === 'ai' ? 'var(--gold)' : 'var(--mat)'}; color:${scoutMode === 'ai' ? 'var(--mat)' : 'var(--chalk)'}; border:1px solid var(--panelLine);" onclick="scoutMode = 'ai'; render();">
+              AI Video Scout Mode
+            </button>
+          </div>
         </div>
 
-        <!-- Video Selection & Source Chooser -->
-        ${!videoBlobUrl && !youtubeVideoId ? `
-          <div class="card" style="padding:12px; margin-bottom:12px;">
+        <!-- Video Source Chooser -->
+        ${!hasLoadedVideo ? `
+          <div class="card" style="padding:12px;">
             <div style="font-size:11px; font-weight:700; color:var(--gold); margin-bottom:6px;">Choose Match Video Source:</div>
-            <div class="grid-2" style="margin-bottom:8px;">
+            <div class="grid-2">
               <div>
                 <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Option 1: Upload Video (.mp4)</label>
                 <input type="file" accept="video/*" class="input" style="margin-bottom:0;" onchange="handleSharedVideoFile(event)" />
@@ -1171,17 +1292,40 @@
               </div>
             </div>
           </div>
-        ` : ''}
+        ` : `
+          <!-- Loaded Match Video Player Card (Reorderable) -->
+          <div id="video-card-slot"></div>
+        `}
 
+        <!-- Mode Content Container (Manual Scoring / AI Video Scout) -->
         ${scoutMode === 'manual' ? renderManualScoutContent(activeW, boutOpponents, autoOpponent) : renderAIScoutContent(activeW, boutOpponents, autoOpponent)}
       `;
+
+      if (hasLoadedVideo) {
+        const slot = target.querySelector("#video-card-slot");
+        if (slot) slot.replaceWith(getVideoCardEl());
+      }
+    }
+
+    function formatActiveModifiersSummary() {
+      if (!activeTieModifiers.length) return '';
+      const parts = activeTieModifiers.map(m => {
+        const isWrestler = typeof m === 'object' ? (m.owner !== 'opponent') : true;
+        const label = typeof m === 'object' ? `${m.owner === 'opponent' ? 'Opp: ' : ''}${m.tie}` : m;
+        const color = isWrestler ? 'var(--green)' : 'var(--red)';
+        return `<span style="color:${color}; font-weight:700;">${label}</span>`;
+      });
+      return `(${parts.join(', ')})`;
     }
 
     function renderManualScoutContent(activeW, boutOpponents, autoOpponent) {
       if (!activeMatch) {
         return `
           <div class="card">
-            <div class="card-title">Score Match: ${activeW.name} (${activeW.weightClass} lbs)</div>
+            <div class="card-title">
+              <span>Score Match: ${activeW.name} (${activeW.weightClass} lbs)</span>
+              ${helpIcon('scout_manual')}
+            </div>
             
             <div class="grid-2">
               <div>
@@ -1224,7 +1368,7 @@
       });
 
       const choiceEvents = activeMatch.events.filter(e => e.category === "Choice");
-      const p2ChoiceEv = choiceEvents.find(e => e.period === "P2");
+      const p2ChoiceEvs = choiceEvents.filter(e => e.period === "P2");
       const p3ChoiceEv = choiceEvents.find(e => e.period === "P3");
 
       const hasEventsInP1 = activeMatch.events.some(e => e.period === "P1");
@@ -1237,38 +1381,49 @@
       let currentChooserText = "Neutral Start";
 
       if (currentPeriod === "P2") {
-        if (!p2ChoiceEv) {
+        const deferEv = p2ChoiceEvs.find(e => e.detail === "Defer");
+        const finalP2Pos = p2ChoiceEvs.find(e => e.detail !== "Defer");
+
+        if (!deferEv && !finalP2Pos) {
           decisionButtonsDisabled = false;
           currentChooserText = manualDirection === 'offense' ? `${activeW.name}'s Choice for P2` : `Opponent's Choice for P2`;
-        } else if (p2ChoiceEv.detail === "Defer") {
-          currentChooserText = `Opponent Choice (Deferred)`;
+        } else if (deferEv && !finalP2Pos) {
+          decisionButtonsDisabled = false;
+          const deferredToWhom = deferEv.move.includes("Home") ? `${activeMatch.opponent || 'Opponent'}` : activeW.name;
+          currentChooserText = `${deferredToWhom}'s Choice (Deferred)`;
         } else {
-          currentChooserText = `P2 Set: ${p2ChoiceEv.move}`;
+          decisionButtonsDisabled = true;
+          currentChooserText = `P2 Set: ${finalP2Pos.move}`;
         }
       } else if (currentPeriod === "P3") {
         if (!p3ChoiceEv) {
           decisionButtonsDisabled = false;
           currentChooserText = manualDirection === 'offense' ? `${activeW.name}'s Choice for P3` : `Opponent's Choice for P3`;
         } else {
+          decisionButtonsDisabled = true;
           currentChooserText = `P3 Set: ${p3ChoiceEv.move}`;
         }
       }
 
+      const activeList = modifierSubView === "ties" ? taxonomy.TIE_MODIFIERS : (taxonomy.FINISH_MODIFIERS || DEFAULT_TAXONOMY.FINISH_MODIFIERS);
+
       return `
-        <!-- Score Header -->
-        <div class="grid-2" style="margin-bottom:10px;">
-          <div style="background-color:var(--greenDim); border:1px solid var(--green); padding:8px 12px; text-align:center; border-radius:6px;">
-            <div style="font-size:10px; font-weight:700; color:var(--green); text-transform:uppercase;">${activeW.name} (${activeMatch.level})</div>
-            <div style="font-size:28px; font-weight:800; font-family:monospace;">${ourPts}</div>
-          </div>
-          <div style="background-color:var(--redDim); border:1px solid var(--red); padding:8px 12px; text-align:center; border-radius:6px;">
-            <div style="font-size:10px; font-weight:700; color:var(--red); text-transform:uppercase;">${activeMatch.opponent}</div>
-            <div style="font-size:28px; font-weight:800; font-family:monospace;">${oppPts}</div>
+        <!-- Score Card -->
+        <div class="card" style="padding:12px;">
+          <div class="grid-2">
+            <div style="background-color:var(--greenDim); border:1px solid var(--green); padding:8px 12px; text-align:center; border-radius:6px;">
+              <div style="font-size:10px; font-weight:700; color:var(--green); text-transform:uppercase;">${activeW.name} (${activeMatch.level})</div>
+              <div style="font-size:28px; font-weight:800; font-family:monospace;">${ourPts}</div>
+            </div>
+            <div style="background-color:var(--redDim); border:1px solid var(--red); padding:8px 12px; text-align:center; border-radius:6px;">
+              <div style="font-size:10px; font-weight:700; color:var(--red); text-transform:uppercase;">${activeMatch.opponent}</div>
+              <div style="font-size:28px; font-weight:800; font-family:monospace;">${oppPts}</div>
+            </div>
           </div>
         </div>
 
-        <!-- Thinner Period Bar with Dynamic Position Choices -->
-        <div class="card" style="padding:6px 12px; margin-bottom:10px;">
+        <!-- Period Bar Card -->
+        <div class="card" style="padding:8px 12px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
             <div style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase;">Period: ${currentPeriod}</div>
             <div style="font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase;">${currentChooserText}</div>
@@ -1285,37 +1440,65 @@
             <div style="display:flex; gap:4px;">
               <button class="chip" ${decisionButtonsDisabled ? 'disabled' : ''} onclick="recordPositionChoice('Top')">Top</button>
               <button class="chip" ${decisionButtonsDisabled ? 'disabled' : ''} onclick="recordPositionChoice('Bottom')">Bottom</button>
-              <button class="chip" ${decisionButtonsDisabled || currentPeriod !== 'P2' ? 'disabled' : ''} onclick="recordPositionChoice('Defer')">Defer</button>
+              <button class="chip" ${decisionButtonsDisabled || currentPeriod !== 'P2' || (p2ChoiceEvs.some(e => e.detail === 'Defer')) ? 'disabled' : ''} onclick="recordPositionChoice('Defer')">Defer</button>
               <button class="chip" ${decisionButtonsDisabled ? 'disabled' : ''} onclick="recordPositionChoice('Neutral')">Neutral</button>
             </div>
           </div>
         </div>
 
-        <!-- Direction Switcher ABOVE Tie Setup Modifiers -->
-        <div class="grid-2" style="margin-bottom:10px;">
-          <button class="btn" style="padding:10px; font-weight:800; background:${manualDirection === 'offense' ? 'var(--green)' : 'var(--panel)'}; color:var(--chalk);" onclick="setDir('offense')">
-            Offense (By ${activeW.name})
-          </button>
-          <button class="btn" style="padding:10px; font-weight:800; background:${manualDirection === 'defense' ? 'var(--red)' : 'var(--panel)'}; color:var(--chalk);" onclick="setDir('defense')">
-            Faced (vs. ${activeW.name})
-          </button>
+        <!-- Direction Switcher Card -->
+        <div class="card" style="padding:8px 12px;">
+          <div class="grid-2">
+            <button class="btn" style="padding:10px; font-weight:800; background:${manualDirection === 'offense' ? 'var(--green)' : 'var(--mat)'}; border:1px solid var(--panelLine); color:var(--chalk);" onclick="setDir('offense')">
+              Offense (By ${activeW.name})
+            </button>
+            <button class="btn" style="padding:10px; font-weight:800; background:${manualDirection === 'defense' ? 'var(--red)' : 'var(--mat)'}; border:1px solid var(--panelLine); color:var(--chalk);" onclick="setDir('defense')">
+              Faced (vs. ${activeW.name})
+            </button>
+          </div>
         </div>
 
-        <!-- Multi-Tie Setup Modifiers -->
+        <!-- Modifiers Window: Ties & Setups vs Finishes -->
         <div class="card" style="padding:10px 14px;">
-          <div style="font-size:10px; font-weight:800; letter-spacing:1px; color:var(--muted); text-transform:uppercase; margin-bottom:6px;">
-            Tie Setup Modifiers (Select Multiple) ${activeTieModifiers.length ? `<span style="color:var(--gold);">(${activeTieModifiers.join(', ')})</span>` : ''}
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+            <div style="display:flex; gap:6px; align-items:center;">
+              <button class="btn" style="padding:3px 8px; font-size:10px; font-weight:800; background:${modifierSubView === 'ties' ? 'var(--gold)' : 'var(--mat)'}; color:${modifierSubView === 'ties' ? 'var(--mat)' : 'var(--chalk)'}; border:1px solid var(--panelLine);" onclick="modifierSubView = 'ties'; render();">
+                Ties & Setups
+              </button>
+              <button class="btn" style="padding:3px 8px; font-size:10px; font-weight:800; background:${modifierSubView === 'finishes' ? 'var(--gold)' : 'var(--mat)'}; color:${modifierSubView === 'finishes' ? 'var(--mat)' : 'var(--chalk)'}; border:1px solid var(--panelLine);" onclick="modifierSubView = 'finishes'; render();">
+                Finishes
+              </button>
+              <span style="font-size:10px; font-weight:700; color:var(--muted);">${formatActiveModifiersSummary()}</span>
+              ${helpIcon('scout_modifiers')}
+            </div>
+            <div style="display:flex; gap:4px; align-items:center;">
+              <span style="font-size:10px; color:var(--muted); font-weight:700; text-transform:uppercase;">Apply To:</span>
+              <button class="btn" style="padding:3px 8px; font-size:10px; font-weight:800; background:${modifierAssignTarget === 'wrestler' ? 'var(--green)' : 'var(--mat)'}; border:1px solid ${modifierAssignTarget === 'wrestler' ? 'var(--green)' : 'var(--panelLine)'}; color:var(--chalk);" onclick="modifierAssignTarget = 'wrestler'; render();">
+                ${activeW.name} (Wrestler)
+              </button>
+              <button class="btn" style="padding:3px 8px; font-size:10px; font-weight:800; background:${modifierAssignTarget === 'opponent' ? 'var(--red)' : 'var(--mat)'}; border:1px solid ${modifierAssignTarget === 'opponent' ? 'var(--red)' : 'var(--panelLine)'}; color:var(--chalk);" onclick="modifierAssignTarget = 'opponent'; render();">
+                ${activeMatch.opponent || 'Opponent'}
+              </button>
+            </div>
           </div>
           <div class="grid-3">
-            ${taxonomy.TIE_MODIFIERS.map(tie => `
-              <div class="chip ${activeTieModifiers.includes(tie) ? 'selected' : ''}" onclick="toggleTieModifierMulti('${tie}')">
-                ${tie}
-              </div>
-            `).join('')}
+            ${activeList.map(mod => {
+              const matchedMod = activeTieModifiers.find(m => (typeof m === 'object' ? m.tie : m) === mod);
+              let chipClass = "chip";
+              if (matchedMod) {
+                const owner = typeof matchedMod === 'object' ? matchedMod.owner : 'wrestler';
+                chipClass += owner === 'opponent' ? " selected-opponent" : " selected-wrestler";
+              }
+              return `
+                <div class="${chipClass}" onclick="toggleTieModifierMulti('${mod}')">
+                  ${mod} ${matchedMod ? `<span style="font-size:9px;">[${(typeof matchedMod === 'object' ? matchedMod.owner : 'wrestler') === 'opponent' ? 'OPP' : 'WRESTLER'}]</span>` : ''}
+                </div>
+              `;
+            }).join('')}
           </div>
         </div>
 
-        <!-- Move Selection (3 Columns) -->
+        <!-- Move Selection Card -->
         <div class="card">
           <div class="card-title">
             <span>${renderMoveSelectorTitle()}</span>
@@ -1324,7 +1507,7 @@
           ${renderMoveSelectorGrid()}
         </div>
 
-        <!-- Scoring Log -->
+        <!-- Scoring Log Card -->
         <div class="card">
           <div class="card-title">
             <span>Scoring Log (${activeMatch.events.length} events)</span>
@@ -1360,11 +1543,30 @@
     function advancePeriod(p) {
       currentPeriod = p;
       logEvent('Flow', `Period Change: ${p}`, 'success', 0, p);
+
+      if (p === 'P3' && activeMatch) {
+        const choiceEvents = activeMatch.events.filter(e => e.category === "Choice");
+        const p2ChoiceEvs = choiceEvents.filter(e => e.period === "P2");
+        const deferEv = p2ChoiceEvs.find(e => e.detail === "Defer");
+        const finalP2Pos = p2ChoiceEvs.find(e => e.detail !== "Defer");
+
+        if (deferEv) {
+          manualDirection = deferEv.move.includes("Home") ? 'offense' : 'defense';
+        } else if (finalP2Pos) {
+          manualDirection = finalP2Pos.move.includes("Home") ? 'defense' : 'offense';
+        }
+      }
+      render();
     }
 
     function recordPositionChoice(choice) {
       const chooser = manualDirection === 'offense' ? 'Home' : 'Opponent';
       logEvent('Choice', `${chooser} Choice: ${choice}`, 'success', 0, choice);
+
+      if (choice === 'Defer') {
+        manualDirection = (manualDirection === 'offense') ? 'defense' : 'offense';
+      }
+      render();
     }
 
     function renderAIScoutContent(activeW, boutOpponents, autoOpponent) {
@@ -1493,7 +1695,6 @@
       // 3 Columns Takedown Subcategories
       if (selectedPrimaryCat === 'Takedown' && !selectedSubCat) {
         let subs = Object.keys(taxonomy.MOVE_GROUPS.Takedown);
-        if (taxonomy.alphabetize) subs = [...subs].sort();
         return `
           <div class="grid-3">
             ${subs.map(sub => `
@@ -1508,8 +1709,6 @@
       let movesList = selectedPrimaryCat === 'Takedown' 
         ? taxonomy.MOVE_GROUPS.Takedown[selectedSubCat] 
         : taxonomy.MOVE_GROUPS[selectedPrimaryCat];
-
-      if (taxonomy.alphabetize && movesList) movesList = [...movesList].sort();
 
       return `
         <div class="grid-3">
@@ -1539,10 +1738,11 @@
     }
 
     function toggleTieModifierMulti(tie) {
-      if (activeTieModifiers.includes(tie)) {
-        activeTieModifiers = activeTieModifiers.filter(t => t !== tie);
+      const idx = activeTieModifiers.findIndex(m => (typeof m === 'object' ? m.tie : m) === tie);
+      if (idx !== -1) {
+        activeTieModifiers.splice(idx, 1);
       } else {
-        activeTieModifiers.push(tie);
+        activeTieModifiers.push({ tie, owner: modifierAssignTarget });
       }
       render();
     }
@@ -1583,6 +1783,13 @@
 
     function logEvent(category, move, outcome, points = 0, detail = "") {
       const timestamp = pauseVideoAndGetTime();
+      const formattedTie = activeTieModifiers.map(m => {
+        if (typeof m === 'object') {
+          return m.owner === 'opponent' ? `Opp: ${m.tie}` : m.tie;
+        }
+        return m;
+      }).join(" + ");
+
       activeMatch.events.push({ 
         id: Math.random().toString(36).slice(2, 9), 
         matchId: activeMatch.id, 
@@ -1592,7 +1799,7 @@
         category, 
         subCategory: selectedSubCat,
         move, 
-        tie: activeTieModifiers.join(" + "),
+        tie: formattedTie,
         direction: manualDirection, 
         outcome, 
         points,
@@ -1671,19 +1878,139 @@
       }
     }
 
-    /* OFFICIAL DUAL BOUT SHEET */
+    /* EDIT FALL TIMESTAMP */
+    function promptEditFallTime(matchId) {
+      const season = getActiveSeason();
+      const pinEv = season.events.find(e => e.matchId === matchId && (e.detail === "Pin / Fall" || e.detail === "Pin" || (e.move && e.move.includes("Pin"))));
+      const currentTs = pinEv ? pinEv.timestamp || "00:00" : "00:00";
+      const newTs = prompt("Enter new Pin / Fall timestamp (mm:ss):", currentTs);
+      if (newTs !== null) {
+        if (pinEv) {
+          pinEv.timestamp = newTs.trim();
+        } else {
+          season.events.push({
+            id: Math.random().toString(36).slice(2, 9),
+            matchId,
+            period: "P1",
+            category: "Near Fall / Pin",
+            move: "Pin / Fall",
+            detail: "Pin / Fall",
+            direction: "offense",
+            outcome: "success",
+            points: 0,
+            timestamp: newTs.trim(),
+            ts: Date.now()
+          });
+        }
+        persist();
+        render();
+      }
+    }
+
+    /* OFFICIAL DUAL BOUT SHEET & SEASON MATCH LEDGER */
     function renderBoutSheet(target) {
       const season = getActiveSeason();
       const activeBout = getActiveBout();
       const currentWeights = getActiveWeightClasses();
+      const isSeasonScope = store.activeBoutId === "all";
 
+      // If Season Total is selected: Show Season Match Ledger with Wrestler Selector
+      if (isSeasonScope) {
+        const activeW = getActiveWrestler();
+        const sortedRoster = [...season.roster].sort((a, b) => (Number(a.weightClass) || 0) - (Number(b.weightClass) || 0));
+        const wrestlerMatches = activeW ? season.matches.filter(m => m.wrestlerId === activeW.id) : [];
+
+        target.innerHTML = `
+          <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--panelLine); padding-bottom:10px; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+              <div>
+                <div style="font-size:14px; font-weight:800; color:var(--gold); text-transform:uppercase;">Season Match Ledger</div>
+                <div style="font-size:11px; color:var(--muted);">${season.name} · All Competitions</div>
+              </div>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <span style="font-size:11px; font-weight:800; color:var(--gold); text-transform:uppercase;">Select Athlete:</span>
+                <select class="select" style="margin-bottom:0; width:auto; font-size:12px; font-weight:700;" onchange="setActiveWrestler(this.value)">
+                  ${sortedRoster.map(w => `<option value="${w.id}" ${activeW && w.id === activeW.id ? 'selected' : ''}>${w.name} (${w.weightClass} lbs - ${w.level})</option>`).join('')}
+                </select>
+                ${helpIcon('bout_sheet')}
+              </div>
+            </div>
+
+            <table class="sheet-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Event / Opponent Team</th>
+                  <th>Opponent Name</th>
+                  <th>Level</th>
+                  <th>Result</th>
+                  <th>Score / Outcome</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${wrestlerMatches.length === 0 ? '<tr><td colspan="6" style="text-align:center; color:var(--muted);">No matches logged for this wrestler in the season.</td></tr>' : ''}
+                ${wrestlerMatches.map(m => {
+                  const bout = season.bouts.find(b => b.id === m.boutId);
+                  const evs = season.events.filter(e => e.matchId === m.id);
+                  let ourP = 0, oppP = 0;
+                  evs.forEach(e => {
+                    const pts = e.points || 0;
+                    if (e.category === "Penalty") {
+                      if (e.direction === "offense") oppP += pts;
+                      else ourP += pts;
+                    } else {
+                      if (e.direction === "offense") ourP += pts;
+                      else if (e.outcome === "fail") oppP += pts;
+                    }
+                  });
+
+                  const pinEv = evs.find(e => e.detail === "Pin / Fall" || e.detail === "Pin" || (e.move && e.move.includes("Pin")));
+                  const isOffPin = pinEv && pinEv.direction === "offense";
+                  const isDefPin = pinEv && pinEv.direction === "defense";
+
+                  let resultStr = "—";
+                  let outcomeDisplay = "";
+
+                  if (isOffPin) {
+                    resultStr = "WIN";
+                    outcomeDisplay = `<span style="cursor:pointer; text-decoration:underline;" onclick="promptEditFallTime('${m.id}')">Pin (${pinEv.timestamp || '0:00'}) ✎</span>`;
+                  } else if (isDefPin) {
+                    resultStr = "LOSS";
+                    outcomeDisplay = `<span style="cursor:pointer; text-decoration:underline;" onclick="promptEditFallTime('${m.id}')">Pinned (${pinEv.timestamp || '0:00'}) ✎</span>`;
+                  } else if (ourP > oppP) {
+                    resultStr = "WIN";
+                    outcomeDisplay = `${ourP} - ${oppP}`;
+                  } else {
+                    resultStr = "LOSS";
+                    outcomeDisplay = `${ourP} - ${oppP}`;
+                  }
+
+                  return `
+                    <tr>
+                      <td>${m.date || (bout ? bout.date : '—')}</td>
+                      <td>${bout ? `${bout.opponentTeam} [${bout.type}]` : 'Individual Bout'}</td>
+                      <td><strong>${m.opponent}</strong></td>
+                      <td>${m.level}</td>
+                      <td style="font-weight:700; color:${resultStr === 'WIN' ? 'var(--green)' : 'var(--red)'};">${resultStr}</td>
+                      <td style="font-family:monospace; font-weight:700;">${outcomeDisplay}</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+        return;
+      }
+
+      // Event Scoped: Show Dual / Tournament Bout Sheet
       let teamScoreOur = 0;
       let teamScoreOpp = 0;
 
       const varsityMatches = [];
       const jvExhMatches = [];
 
-      season.matches.filter(m => store.activeBoutId === "all" || m.boutId === store.activeBoutId).forEach(m => {
+      season.matches.filter(m => m.boutId === store.activeBoutId).forEach(m => {
         const ourW = season.roster.find(w => w.id === m.wrestlerId);
         const oppW = activeBout && activeBout.opponentRoster ? activeBout.opponentRoster.find(o => o.name === m.opponent) : null;
         
@@ -1737,16 +2064,23 @@
             }
           });
 
-          const hasPin = matchEvs.some(e => e.detail === "Pin / Fall" || e.detail === "Pin" || e.move.includes("Pin"));
+          const pinEv = matchEvs.find(e => e.detail === "Pin / Fall" || e.detail === "Pin" || (e.move && e.move.includes("Pin")));
+          const isOffPin = pinEv && pinEv.direction === "offense";
+          const isDefPin = pinEv && pinEv.direction === "defense";
+
           let resultStr = "—", teamPtsOur = 0, teamPtsOpp = 0;
 
-          if (ourP > oppP || (hasPin && matchEvs.some(e => e.direction === "offense" && (e.detail === "Pin / Fall" || e.detail === "Pin")))) {
-            resultStr = `WIN (${ourP}-${oppP})`;
-            teamPtsOur = hasPin ? 6 : (ourP - oppP >= 8 ? 4 : 3);
+          if (isOffPin || (!isDefPin && ourP > oppP)) {
+            resultStr = isOffPin 
+              ? `<span style="cursor:pointer; text-decoration:underline;" onclick="promptEditFallTime('${m.id}')">WIN (Pin ${pinEv.timestamp || '0:00'}) ✎</span>` 
+              : `WIN (${ourP}-${oppP})`;
+            teamPtsOur = isOffPin ? 6 : (ourP - oppP >= 8 ? 4 : 3);
             teamScoreOur += teamPtsOur;
           } else {
-            resultStr = `LOSS (${ourP}-${oppP})`;
-            teamPtsOpp = hasPin ? 6 : (oppP - ourP >= 8 ? 4 : 3);
+            resultStr = isDefPin 
+              ? `<span style="cursor:pointer; text-decoration:underline;" onclick="promptEditFallTime('${m.id}')">LOSS (Pinned ${pinEv.timestamp || '0:00'}) ✎</span>` 
+              : `LOSS (${ourP}-${oppP})`;
+            teamPtsOpp = isDefPin ? 6 : (oppP - ourP >= 8 ? 4 : 3);
             teamScoreOpp += teamPtsOpp;
           }
 
@@ -1756,7 +2090,7 @@
               <td>${m.ourW ? `${m.ourW.name}` : 'FORFEIT'}</td>
               <td>${m.opponent}</td>
               <td>Varsity</td>
-              <td style="font-weight:700; color:${resultStr.startsWith('WIN') ? 'var(--green)' : 'var(--red)'};">${resultStr}</td>
+              <td style="font-weight:700; color:${resultStr.includes('WIN') ? 'var(--green)' : 'var(--red)'};">${resultStr}</td>
               <td style="font-family:monospace; color:var(--green); font-weight:700;">${teamPtsOur || '—'}</td>
               <td style="font-family:monospace; color:var(--red); font-weight:700;">${teamPtsOpp || '—'}</td>
             </tr>
@@ -1778,14 +2112,22 @@
           }
         });
 
-        const resultStr = ourP > oppP ? `WIN (${ourP}-${oppP})` : `LOSS (${ourP}-${oppP})`;
+        const pinEv = matchEvs.find(e => e.detail === "Pin / Fall" || e.detail === "Pin" || (e.move && e.move.includes("Pin")));
+        const isOffPin = pinEv && pinEv.direction === "offense";
+        const isDefPin = pinEv && pinEv.direction === "defense";
+
+        let resultStr = "—";
+        if (isOffPin) resultStr = `<span style="cursor:pointer; text-decoration:underline;" onclick="promptEditFallTime('${m.id}')">WIN (Pin ${pinEv.timestamp || '0:00'}) ✎</span>`;
+        else if (isDefPin) resultStr = `<span style="cursor:pointer; text-decoration:underline;" onclick="promptEditFallTime('${m.id}')">LOSS (Pinned ${pinEv.timestamp || '0:00'}) ✎</span>`;
+        else resultStr = ourP > oppP ? `WIN (${ourP}-${oppP})` : `LOSS (${ourP}-${oppP})`;
+
         return `
           <tr>
             <td><strong>${m.assignedWeight}</strong></td>
             <td>${m.ourW ? m.ourW.name : 'Unknown'}</td>
             <td>${m.opponent}</td>
             <td>${m.level}</td>
-            <td style="font-weight:700; color:${resultStr.startsWith('WIN') ? 'var(--green)' : 'var(--red)'};">${resultStr}</td>
+            <td style="font-weight:700; color:${resultStr.includes('WIN') ? 'var(--green)' : 'var(--red)'};">${resultStr}</td>
             <td style="color:var(--muted); font-size:10px;">(0 Exh)</td>
             <td style="color:var(--muted); font-size:10px;">(0 Exh)</td>
           </tr>
@@ -1809,6 +2151,7 @@
                 <span style="font-size:14px; color:var(--muted);"> - </span>
                 <span style="font-size:20px; font-weight:800; color:var(--red);">${teamScoreOpp}</span>
               </div>
+              ${helpIcon('bout_sheet')}
             </div>
           </div>
 
@@ -1899,11 +2242,10 @@
           const matchEvs = season.events.filter(e => e.matchId === match.id);
           
           const symbolMap = (e) => {
-            if (e.category === "Choice") {
-              const who = e.direction === "offense" ? "H" : "V";
-              return `${who}:Choice[${e.detail || e.move}]`;
-            }
             const who = e.direction === "offense" ? "H" : "V";
+            if (e.category === "Choice") {
+              return `[${who}:${e.detail || e.move}]`;
+            }
             let sym = "T3";
             if (e.category === "Escape") sym = "E1";
             else if (e.category === "Reversal") sym = "R2";
@@ -1914,9 +2256,20 @@
             return `${who}:${sym}`;
           };
 
-          const p1Evs = matchEvs.filter(e => e.period === "P1" && (e.outcome === "success" || e.category === "Choice"));
-          const p2Evs = matchEvs.filter(e => e.period === "P2" && (e.outcome === "success" || e.category === "Choice"));
-          const p3Evs = matchEvs.filter(e => e.period === "P3" && (e.outcome === "success" || e.category === "Choice"));
+          const filterPeriodEvents = (p) => {
+            return matchEvs.filter(e => {
+              if (e.period !== p) return false;
+              if (e.category === "Choice") return true;
+              if (e.category === "Penalty") return true;
+              if (e.direction === "offense" && e.outcome === "success") return true;
+              if (e.direction === "defense" && e.outcome === "fail") return true;
+              return false;
+            });
+          };
+
+          const p1Evs = filterPeriodEvents("P1");
+          const p2Evs = filterPeriodEvents("P2");
+          const p3Evs = filterPeriodEvents("P3");
 
           p1Score = p1Evs.map(symbolMap).join(", ") || "0-0";
           p2Score = p2Evs.map(symbolMap).join(", ") || "—";
@@ -1934,17 +2287,26 @@
             }
           });
 
-          matchScore = `${ourP} - ${oppP}`;
+          const pinEv = matchEvs.find(e => e.detail === "Pin / Fall" || e.detail === "Pin" || (e.move && e.move.includes("Pin")));
+          const isOffPin = pinEv && pinEv.direction === "offense";
+          const isDefPin = pinEv && pinEv.direction === "defense";
 
-          const pinEv = matchEvs.find(e => e.detail === "Pin / Fall" || e.detail === "Pin");
-          if (pinEv) fallTime = pinEv.timestamp || "FALL";
+          if (isOffPin) {
+            fallTime = pinEv.timestamp || "FALL";
+            matchScore = "FALL";
+          } else if (isDefPin) {
+            fallTime = pinEv.timestamp || "DEF FALL";
+            matchScore = "FALL";
+          } else {
+            matchScore = `${ourP} - ${oppP}`;
+          }
 
-          if (ourP > oppP || pinEv) {
-            const pts = pinEv ? 6 : (ourP - oppP >= 15 ? 5 : (ourP - oppP >= 8 ? 4 : 3));
+          if (isOffPin || (!isDefPin && ourP > oppP)) {
+            const pts = isOffPin ? 6 : (ourP - oppP >= 15 ? 5 : (ourP - oppP >= 8 ? 4 : 3));
             cumHomeTeamPts += pts;
             homeDualPt = String(cumHomeTeamPts);
           } else {
-            const pts = pinEv ? 6 : (oppP - ourP >= 15 ? 5 : (oppP - ourP >= 8 ? 4 : 3));
+            const pts = isDefPin ? 6 : (oppP - ourP >= 15 ? 5 : (oppP - ourP >= 8 ? 4 : 3));
             cumOppTeamPts += pts;
             oppDualPt = String(cumOppTeamPts);
           }
@@ -1997,7 +2359,7 @@
             <div><strong>ESCAPE</strong> - E1</div>
             <div><strong>NEAR FALL</strong> - N2, N3, N4</div>
             <div><strong>PENALTY</strong> - P1, P2</div>
-            <div><strong>CHOICE</strong> - Top, Bot, Def</div>
+            <div><strong>CHOICE</strong> - Top, Bottom, Neutral, Defer</div>
           </div>
         </div>
       `;
@@ -2042,30 +2404,291 @@
       return { offense: format(offense), defense: format(defense) };
     }
 
+    function computeTeamStatsWithTieBreakdown() {
+      const season = getActiveSeason();
+      const wEvents = season.events.filter(e => {
+        if (store.activeBoutId !== "all" && e.boutId !== store.activeBoutId) return false;
+        return true;
+      });
+
+      const offense = {}, defense = {};
+
+      wEvents.forEach(e => {
+        const bucket = e.direction === "offense" ? offense : defense;
+        if (!bucket[e.move]) {
+          bucket[e.move] = { move: e.move, category: e.category, attempts: 0, success: 0, ties: {} };
+        }
+        bucket[e.move].attempts += 1;
+        if (e.outcome === "success") bucket[e.move].success += 1;
+
+        const tieKey = e.tie || "Open / Unspecified Tie";
+        if (!bucket[e.move].ties[tieKey]) {
+          bucket[e.move].ties[tieKey] = { tie: tieKey, attempts: 0, success: 0 };
+        }
+        bucket[e.move].ties[tieKey].attempts += 1;
+        if (e.outcome === "success") bucket[e.move].ties[tieKey].success += 1;
+      });
+
+      const format = obj => Object.values(obj).map(r => ({
+        ...r,
+        rate: Math.round((r.success / r.attempts) * 100),
+        tieList: Object.values(r.ties).map(t => ({
+          ...t,
+          rate: Math.round((t.success / t.attempts) * 100)
+        })).sort((a,b) => b.attempts - a.attempts)
+      })).sort((a,b) => b.attempts - a.attempts);
+
+      return { offense: format(offense), defense: format(defense) };
+    }
+
+    function computePositionalProficiency(targetWrestlerId = null) {
+      const season = getActiveSeason();
+      const targetMatches = season.matches.filter(m => {
+        if (targetWrestlerId && m.wrestlerId !== targetWrestlerId) return false;
+        if (store.activeBoutId !== "all" && m.boutId !== store.activeBoutId) return false;
+        return true;
+      });
+
+      let neutral = { opps: 0, successes: 0, failures: 0 };
+      let top = { opps: 0, successes: 0, failures: 0 };
+      let bottom = { opps: 0, successes: 0, failures: 0 };
+      let choices = { neutral: 0, top: 0, bottom: 0, defer: 0 };
+
+      targetMatches.forEach(m => {
+        const mEvs = season.events
+          .filter(e => e.matchId === m.id)
+          .sort((a, b) => (a.ts || 0) - (b.ts || 0));
+
+        // Neutral starts with Period 1
+        neutral.opps += 1;
+
+        mEvs.forEach(e => {
+          // Track choice preferences made BY THE WRESTLER ONLY (Offense / Home)
+          if (e.category === "Choice" && e.direction === "offense") {
+            const pos = e.detail;
+            if (pos === "Neutral") choices.neutral += 1;
+            else if (pos === "Top") choices.top += 1;
+            else if (pos === "Bottom") choices.bottom += 1;
+            else if (pos === "Defer") choices.defer += 1;
+          }
+
+          // Overtime neutral start
+          if (e.category === "Flow" && e.detail === "OT") {
+            neutral.opps += 1;
+          }
+
+          // Choice options impact on opportunities
+          if (e.category === "Choice") {
+            const isHomeChoice = e.move.includes("Home");
+            const pos = e.detail;
+
+            if (pos === "Neutral") {
+              neutral.opps += 1;
+            } else if (pos === "Top") {
+              if (isHomeChoice) top.opps += 1;
+              else bottom.opps += 1;
+            } else if (pos === "Bottom") {
+              if (isHomeChoice) bottom.opps += 1;
+              else top.opps += 1;
+            }
+          }
+
+          // Takedown
+          if (e.category === "Takedown") {
+            if (e.direction === "offense" && e.outcome === "success") {
+              neutral.successes += 1;
+              top.opps += 1;
+            } else if (e.direction === "defense" && e.outcome === "fail") {
+              neutral.failures += 1;
+              bottom.opps += 1;
+            }
+          }
+
+          // Escape
+          if (e.category === "Escape") {
+            if (e.direction === "offense" && e.outcome === "success") {
+              bottom.successes += 1;
+              neutral.opps += 1;
+            } else if (e.direction === "defense" && e.outcome === "fail") {
+              top.failures += 1;
+              neutral.opps += 1;
+            }
+          }
+
+          // Reversal
+          if (e.category === "Reversal") {
+            if (e.direction === "offense" && e.outcome === "success") {
+              bottom.successes += 1;
+              top.opps += 1;
+            } else if (e.direction === "defense" && e.outcome === "fail") {
+              top.failures += 1;
+              bottom.opps += 1;
+            }
+          }
+
+          // Near Fall / Pin & Turns
+          if (e.category === "Near Fall / Pin" || e.category === "Turns") {
+            if (e.direction === "offense" && e.outcome === "success") {
+              top.successes += 1;
+            } else if (e.direction === "defense" && e.outcome === "fail") {
+              bottom.failures += 1;
+            }
+          }
+        });
+      });
+
+      const calcPct = (s, f, opp) => opp > 0 ? Math.round(((s - f) / opp) * 100) : 0;
+
+      return {
+        neutral: { ...neutral, pct: calcPct(neutral.successes, neutral.failures, neutral.opps) },
+        top: { ...top, pct: calcPct(top.successes, top.failures, top.opps) },
+        bottom: { ...bottom, pct: calcPct(bottom.successes, bottom.failures, bottom.opps) },
+        choices
+      };
+    }
+
+    /* Ranks a wrestler against same-division teammates for a specific move */
+    function getMoveTeamRank(wrestler, move, direction) {
+      const season = getActiveSeason();
+      const sameDivision = season.roster.filter(w => w.division === wrestler.division);
+
+      const totals = sameDivision.map(w => {
+        const evs = season.events.filter(e =>
+          e.wrestlerId === w.id &&
+          e.move === move &&
+          e.direction === direction &&
+          (store.activeBoutId === "all" || e.boutId === store.activeBoutId)
+        );
+        const attempts = evs.length;
+        const success = evs.filter(e => e.outcome === "success").length;
+        return { id: w.id, attempts, rate: attempts ? success / attempts : -1 };
+      }).filter(t => t.attempts > 0);
+
+      totals.sort((a, b) => b.rate - a.rate || b.attempts - a.attempts);
+      return totals.findIndex(t => t.id === wrestler.id);
+    }
+
+    function medalForRank(rank) {
+      if (rank === 0) return "🥇";
+      if (rank === 1) return "🥈";
+      if (rank === 2) return "🥉";
+      return "";
+    }
+
     function renderStats(target) {
       const activeW = getActiveWrestler();
       const season = getActiveSeason();
       const activeBout = getActiveBout();
-      if (!activeW) return target.innerHTML = '<div class="card"><p style="color:var(--muted); font-size:12px;">Select an active wrestler on the Roster page.</p></div>';
-      
-      const { offense, defense } = computeStatsWithTieBreakdown(activeW.id);
-      const scopedMatches = season.matches.filter(m => m.wrestlerId === activeW.id && (store.activeBoutId === "all" || m.boutId === store.activeBoutId)).length;
+      if (!activeW && !statsShowTeam) return target.innerHTML = '<div class="card"><p style="color:var(--muted); font-size:12px;">Select an active wrestler on the Roster page.</p></div>';
+
+      const sortedRoster = [...season.roster].sort((a, b) => (Number(a.weightClass) || 0) - (Number(b.weightClass) || 0));
+      const boysOptions = sortedRoster.filter(w => w.division === "Boys");
+      const girlsOptions = sortedRoster.filter(w => w.division === "Girls");
+
+      const { offense, defense } = statsShowTeam
+        ? computeTeamStatsWithTieBreakdown()
+        : computeStatsWithTieBreakdown(activeW.id);
+
+      const profStats = statsShowTeam
+        ? computePositionalProficiency(null)
+        : computePositionalProficiency(activeW.id);
+
+      const scopedMatches = statsShowTeam
+        ? season.matches.filter(m => store.activeBoutId === "all" || m.boutId === store.activeBoutId).length
+        : season.matches.filter(m => m.wrestlerId === activeW.id && (store.activeBoutId === "all" || m.boutId === store.activeBoutId)).length;
+
+      const titleText = statsShowTeam
+        ? `Stats: Entire Team (${scopedMatches} Matches ${activeBout ? `vs ${activeBout.opponentTeam}` : ''})`
+        : `Stats: ${activeW.name} (${scopedMatches} Matches ${activeBout ? `vs ${activeBout.opponentTeam}` : ''})`;
+
+      const rateColor = rate => rate >= 60 ? 'var(--green)' : rate < 40 ? 'var(--red)' : 'var(--gold)';
+      const profColor = pct => pct > 0 ? 'var(--green)' : pct < 0 ? 'var(--red)' : 'var(--gold)';
 
       target.innerHTML = `
+        <div class="card" style="padding:10px 14px;">
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <span style="font-size:11px; font-weight:800; color:var(--gold); text-transform:uppercase;">Viewing:</span>
+            <select class="select" style="margin-bottom:0; flex:1; min-width:200px; max-width:340px; font-size:12px; font-weight:700;" onchange="if (this.value === '__TEAM__') { statsShowTeam = true; } else { statsShowTeam = false; setActiveWrestler(this.value); } render();">
+              <option value="__TEAM__" ${statsShowTeam ? 'selected' : ''}>🏆 Entire Team (Compiled)</option>
+              ${boysOptions.length ? `<optgroup label="Boys">${boysOptions.map(w => `<option value="${w.id}" ${!statsShowTeam && w.id === activeW.id ? 'selected' : ''}>${w.name} — ${w.weightClass} lbs (${w.level})</option>`).join('')}</optgroup>` : ''}
+              ${girlsOptions.length ? `<optgroup label="Girls">${girlsOptions.map(w => `<option value="${w.id}" ${!statsShowTeam && w.id === activeW.id ? 'selected' : ''}>${w.name} — ${w.weightClass} lbs (${w.level})</option>`).join('')}</optgroup>` : ''}
+            </select>
+          </div>
+        </div>
+
         <div class="card">
-          <div class="card-title">Stats: ${activeW.name} (${scopedMatches} Matches ${activeBout ? `vs ${activeBout.opponentTeam}` : ''})</div>
+          <div class="card-title">
+            <span>${titleText}</span>
+            ${helpIcon('stats_proficiency')}
+          </div>
           
+          <!-- Positional Proficiency Window (Listed Across the Top) -->
           <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:8px;">
-            Offensive Move Efficiency <span style="font-weight:400; text-transform:none;">(Click to view Tie Breakdown)</span>
+            Positional Proficiency <span style="font-weight:400; text-transform:none;">(Click a position for opportunities & breakdowns)</span>
+          </div>
+          <div class="grid-3" style="margin-bottom:12px;">
+            <div style="background:var(--mat); border:1px solid var(--panelLine); padding:10px; border-radius:6px; text-align:center; cursor:pointer;" onclick="activeProficiencyDetail = 'Neutral'; activeModal = 'proficiency-detail'; render();">
+              <div style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase;">Neutral</div>
+              <div style="font-size:22px; font-weight:800; font-family:monospace; color:${profColor(profStats.neutral.pct)};">
+                ${profStats.neutral.pct > 0 ? `+${profStats.neutral.pct}` : profStats.neutral.pct}%
+              </div>
+              <div style="font-size:10px; color:var(--muted);">${profStats.neutral.opps} Opportunities</div>
+            </div>
+
+            <div style="background:var(--mat); border:1px solid var(--panelLine); padding:10px; border-radius:6px; text-align:center; cursor:pointer;" onclick="activeProficiencyDetail = 'Top'; activeModal = 'proficiency-detail'; render();">
+              <div style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase;">Top</div>
+              <div style="font-size:22px; font-weight:800; font-family:monospace; color:${profColor(profStats.top.pct)};">
+                ${profStats.top.pct > 0 ? `+${profStats.top.pct}` : profStats.top.pct}%
+              </div>
+              <div style="font-size:10px; color:var(--muted);">${profStats.top.opps} Opportunities</div>
+            </div>
+
+            <div style="background:var(--mat); border:1px solid var(--panelLine); padding:10px; border-radius:6px; text-align:center; cursor:pointer;" onclick="activeProficiencyDetail = 'Bottom'; activeModal = 'proficiency-detail'; render();">
+              <div style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase;">Bottom</div>
+              <div style="font-size:22px; font-weight:800; font-family:monospace; color:${profColor(profStats.bottom.pct)};">
+                ${profStats.bottom.pct > 0 ? `+${profStats.bottom.pct}` : profStats.bottom.pct}%
+              </div>
+              <div style="font-size:10px; color:var(--muted);">${profStats.bottom.opps} Opportunities</div>
+            </div>
+          </div>
+
+          <!-- Choice Preferences Window (Wrestler Choice Only) -->
+          <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:6px;">
+            Position Choice Preferences <span style="font-weight:400; text-transform:none;">(Positions chosen by ${statsShowTeam ? 'team' : (activeW ? activeW.name : 'wrestler')})</span>
+          </div>
+          <div class="grid-3" style="margin-bottom:16px;">
+            <div style="background:var(--mat); border:1px solid var(--panelLine); padding:8px; border-radius:4px; text-align:center;">
+              <div style="font-size:10px; font-weight:700; color:var(--chalk);">Chose Neutral</div>
+              <div style="font-size:18px; font-weight:800; font-family:monospace; color:var(--gold);">${profStats.choices.neutral}</div>
+            </div>
+            <div style="background:var(--mat); border:1px solid var(--panelLine); padding:8px; border-radius:4px; text-align:center;">
+              <div style="font-size:10px; font-weight:700; color:var(--chalk);">Chose Top</div>
+              <div style="font-size:18px; font-weight:800; font-family:monospace; color:var(--gold);">${profStats.choices.top}</div>
+            </div>
+            <div style="background:var(--mat); border:1px solid var(--panelLine); padding:8px; border-radius:4px; text-align:center;">
+              <div style="font-size:10px; font-weight:700; color:var(--chalk);">Chose Bottom</div>
+              <div style="font-size:18px; font-weight:800; font-family:monospace; color:var(--gold);">${profStats.choices.bottom}</div>
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">
+              Offensive Move Efficiency <span style="font-weight:400; text-transform:none;">(Click to view Tie Breakdown)</span>
+            </div>
+            ${helpIcon('stats_efficiency')}
           </div>
           ${offense.length === 0 ? '<p style="color:var(--muted); font-size:12px; margin-bottom:12px;">No offensive data logged yet.</p>' : ''}
-          ${offense.map(r => `
+          ${offense.map(r => {
+            const color = rateColor(r.rate);
+            const rank = statsShowTeam ? -1 : getMoveTeamRank(activeW, r.move, "offense");
+            const medal = medalForRank(rank);
+            return `
             <div style="margin-bottom:8px; padding:6px; border-radius:4px; background:var(--mat); cursor:pointer;" onclick="expandedStatMove = (expandedStatMove === '${r.move}') ? null : '${r.move}'; render();">
               <div style="display:flex; justify-content:space-between; font-size:12px;">
-                <span style="font-weight:700; color:var(--chalk);">${r.move} ${expandedStatMove === r.move ? '▲' : '▼'}</span>
-                <span style="font-family:monospace; color:var(--gold);">${r.success}/${r.attempts} (${r.rate}%)</span>
+                <span style="font-weight:700; color:var(--chalk);">${medal ? medal + ' ' : ''}${r.move} ${expandedStatMove === r.move ? '▲' : '▼'}</span>
+                <span style="font-family:monospace; color:${color};">${r.success}/${r.attempts} (${r.rate}%)</span>
               </div>
-              <div class="bar-bg"><div class="bar-fill" style="width:${r.rate}%; background-color:${r.rate >= 60 ? 'var(--green)' : r.rate < 40 ? 'var(--red)' : 'var(--gold)'};"></div></div>
+              <div class="bar-bg"><div class="bar-fill" style="width:${r.rate}%; background-color:${color};"></div></div>
               
               ${expandedStatMove === r.move ? `
                 <div style="margin-top:8px; padding:8px; border-top:1px solid var(--panelLine); background:var(--panel); border-radius:4px;">
@@ -2079,19 +2702,27 @@
                 </div>
               ` : ''}
             </div>
-          `).join('')}
+          `;
+          }).join('')}
 
-          <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; margin:16px 0 8px 0;">
-            Defensive Efficiency <span style="font-weight:400; text-transform:none;">(Click to view Tie Breakdown)</span>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin:16px 0 8px 0;">
+            <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">
+              Defensive Efficiency <span style="font-weight:400; text-transform:none;">(Click to view Tie Breakdown)</span>
+            </div>
+            ${helpIcon('stats_efficiency')}
           </div>
           ${defense.length === 0 ? '<p style="color:var(--muted); font-size:12px;">No defensive data logged yet.</p>' : ''}
-          ${defense.map(r => `
+          ${defense.map(r => {
+            const color = rateColor(r.rate);
+            const rank = statsShowTeam ? -1 : getMoveTeamRank(activeW, r.move, "defense");
+            const medal = medalForRank(rank);
+            return `
             <div style="margin-bottom:8px; padding:6px; border-radius:4px; background:var(--mat); cursor:pointer;" onclick="expandedDefStatMove = (expandedDefStatMove === '${r.move}') ? null : '${r.move}'; render();">
               <div style="display:flex; justify-content:space-between; font-size:12px;">
-                <span style="font-weight:700; color:var(--chalk);">${r.move} ${expandedDefStatMove === r.move ? '▲' : '▼'}</span>
-                <span style="font-family:monospace; color:var(--muted);">${r.success}/${r.attempts} defended (${r.rate}%)</span>
+                <span style="font-weight:700; color:var(--chalk);">${medal ? medal + ' ' : ''}${r.move} ${expandedDefStatMove === r.move ? '▲' : '▼'}</span>
+                <span style="font-family:monospace; color:${color};">${r.success}/${r.attempts} defended (${r.rate}%)</span>
               </div>
-              <div class="bar-bg"><div class="bar-fill" style="width:${r.rate}%; background-color:${r.rate >= 60 ? 'var(--green)' : r.rate < 40 ? 'var(--red)' : 'var(--gold)'};"></div></div>
+              <div class="bar-bg"><div class="bar-fill" style="width:${r.rate}%; background-color:${color};"></div></div>
               
               ${expandedDefStatMove === r.move ? `
                 <div style="margin-top:8px; padding:8px; border-top:1px solid var(--panelLine); background:var(--panel); border-radius:4px;">
@@ -2099,13 +2730,14 @@
                   ${r.tieList.map(t => `
                     <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px; color:var(--chalk);">
                       <span>↳ ${t.tie}</span>
-                      <span style="font-family:monospace; color:var(--muted);">${t.success}/${t.attempts} defended (${r.rate}%)</span>
+                      <span style="font-family:monospace; color:var(--muted);">${t.success}/${t.attempts} defended (${t.rate}%)</span>
                     </div>
                   `).join('')}
                 </div>
               ` : ''}
             </div>
-          `).join('')}
+          `;
+          }).join('')}
         </div>
       `;
     }
@@ -2113,22 +2745,48 @@
     function renderPlan(target) {
       const activeW = getActiveWrestler();
       const season = getActiveSeason();
-      if (!activeW) return target.innerHTML = '<div class="card"><p style="color:var(--muted); font-size:12px;">Select an active wrestler on the Roster page.</p></div>';
+      if (!activeW && !statsShowTeam) return target.innerHTML = '<div class="card"><p style="color:var(--muted); font-size:12px;">Select an active wrestler on the Roster page.</p></div>';
+
+      const sortedRoster = [...season.roster].sort((a, b) => (Number(a.weightClass) || 0) - (Number(b.weightClass) || 0));
+      const boysOptions = sortedRoster.filter(w => w.division === "Boys");
+      const girlsOptions = sortedRoster.filter(w => w.division === "Girls");
       
-      const { offense, defense } = computeStatsWithTieBreakdown(activeW.id);
-      const weakOffense = offense.filter(r => r.attempts >= 2 && r.rate < 50);
-      const weakDefense = defense.filter(r => r.attempts >= 2 && r.rate < 50);
+      const { offense, defense } = statsShowTeam
+        ? computeTeamStatsWithTieBreakdown()
+        : computeStatsWithTieBreakdown(activeW.id);
+
+      const minAttempts = statsShowTeam ? 4 : 2;
+      const weakOffense = offense.filter(r => r.attempts >= minAttempts && r.rate < 50);
+      const weakDefense = defense.filter(r => r.attempts >= minAttempts && r.rate < 50);
+
+      const planTitle = statsShowTeam
+        ? `Targeted Practice Drills: Entire Team Compiled (${season.name})`
+        : `Targeted Practice Drills: ${activeW.name} (${season.name})`;
 
       target.innerHTML = `
+        <div class="card" style="padding:10px 14px;">
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <span style="font-size:11px; font-weight:800; color:var(--gold); text-transform:uppercase;">Training Plan For:</span>
+            <select class="select" style="margin-bottom:0; flex:1; min-width:200px; max-width:340px; font-size:12px; font-weight:700;" onchange="if (this.value === '__TEAM__') { statsShowTeam = true; } else { statsShowTeam = false; setActiveWrestler(this.value); } render();">
+              <option value="__TEAM__" ${statsShowTeam ? 'selected' : ''}>🏆 Entire Team (Compiled)</option>
+              ${boysOptions.length ? `<optgroup label="Boys">${boysOptions.map(w => `<option value="${w.id}" ${!statsShowTeam && w.id === activeW.id ? 'selected' : ''}>${w.name} — ${w.weightClass} lbs (${w.level})</option>`).join('')}</optgroup>` : ''}
+              ${girlsOptions.length ? `<optgroup label="Girls">${girlsOptions.map(w => `<option value="${w.id}" ${!statsShowTeam && w.id === activeW.id ? 'selected' : ''}>${w.name} — ${w.weightClass} lbs (${w.level})</option>`).join('')}</optgroup>` : ''}
+            </select>
+          </div>
+        </div>
+
         <div class="card">
-          <div class="card-title">Targeted Practice Drills: ${activeW.name} (${season.name})</div>
+          <div class="card-title">
+            <span>${planTitle}</span>
+            ${helpIcon('plan_remediation')}
+          </div>
           
           <div style="font-size:11px; font-weight:800; color:var(--gold); text-transform:uppercase; margin-bottom:6px;">Offensive Remediation Focus</div>
-          ${weakOffense.length === 0 ? '<p style="color:var(--muted); font-size:12px; margin-bottom:12px;">No severe offensive weak spots logged.</p>' : ''}
+          ${weakOffense.length === 0 ? `<p style="color:var(--muted); font-size:12px; margin-bottom:12px;">No severe offensive weak spots logged (min ${minAttempts} attempts).</p>` : ''}
           ${weakOffense.map(r => `
             <div style="background:var(--mat); padding:10px; border-radius:4px; margin-bottom:6px; border:1px solid var(--panelLine);">
               <div style="display:flex; justify-content:space-between; font-weight:700; font-size:13px; margin-bottom:4px;">
-                <span>${r.move}</span>
+                <span>${r.move} (${r.success}/${r.attempts} converted)</span>
                 <span style="color:var(--red); font-family:monospace;">${r.rate}% Success</span>
               </div>
               <div style="font-size:11px; color:var(--chalk);">
@@ -2139,11 +2797,11 @@
           `).join('')}
 
           <div style="font-size:11px; font-weight:800; color:var(--gold); text-transform:uppercase; margin:14px 0 6px 0;">Defensive Remediation Focus</div>
-          ${weakDefense.length === 0 ? '<p style="color:var(--muted); font-size:12px;">No severe defensive gaps logged.</p>' : ''}
+          ${weakDefense.length === 0 ? `<p style="color:var(--muted); font-size:12px;">No severe defensive gaps logged (min ${minAttempts} attacks faced).</p>` : ''}
           ${weakDefense.map(r => `
             <div style="background:var(--mat); padding:10px; border-radius:4px; margin-bottom:6px; border:1px solid var(--panelLine);">
               <div style="display:flex; justify-content:space-between; font-weight:700; font-size:13px; margin-bottom:4px;">
-                <span>Defense vs ${r.move}</span>
+                <span>Defense vs ${r.move} (${r.success}/${r.attempts} defended)</span>
                 <span style="color:var(--red); font-family:monospace;">${r.rate}% Defended</span>
               </div>
               <div style="font-size:11px; color:var(--chalk);">
@@ -2156,7 +2814,7 @@
       `;
     }
 
-    /* ADMIN TAB (INCLUDES FULL WEIGHT CLASS MANAGEMENT) */
+    /* ADMIN TAB */
     let draggedMove = null;
 
     function renderAdmin(target) {
@@ -2169,51 +2827,86 @@
       ];
 
       target.innerHTML = `
-        <!-- Screen Layout Lock -->
+        <!-- Unified Customize UI Window -->
         <div class="card">
-          <div class="card-title">Screen Layout</div>
-          <p style="font-size:12px; color:var(--muted); margin-bottom:10px;">
-            Unlock to drag and rearrange the cards on the Roster, Scout, Bout Sheet, Stats, and Training Plan pages to set them up how you like. Lock it back when you're done so nothing shifts by accident during a match.
-          </p>
-          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-            <button class="btn ${uiUnlocked ? 'btn-red' : 'btn-green'}" onclick="toggleUILock()">
-              ${uiUnlocked ? '🔓 Unlocked — Click to Lock' : '🔒 Locked — Click to Unlock'}
-            </button>
-            <span style="font-size:11px; color:var(--muted);">${uiUnlocked ? 'Cards can be dragged on other pages right now.' : 'Layout is locked. Cards will not move.'}</span>
+          <div class="card-title">
+            <span>Customize UI</span>
+            ${helpIcon('admin_ui')}
           </div>
-          ${uiUnlocked ? `
-            <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--panelLine);">
-              <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Reset a page back to its default layout</label>
-              <div class="grid-3" style="margin-top:6px;">
-                ${tabsWithCards.map(t => `
-                  <button class="btn" style="background:var(--panelLine); color:var(--chalk); font-size:10px;" onclick="resetTabLayout('${t.key}')">Reset ${t.label}</button>
-                `).join('')}
+          
+          <!-- Screen Layout Section -->
+          <div style="margin-bottom:14px;">
+            <div style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">Screen Layout & Reordering</div>
+            <p style="font-size:12px; color:var(--muted); margin-bottom:8px;">
+              Unlock to drag and rearrange cards on the Roster, Scout, Bout Sheet, Stats, and Training Plan pages. Lock it when finished.
+            </p>
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+              <button class="btn ${uiUnlocked ? 'btn-red' : 'btn-green'}" onclick="toggleUILock()">
+                ${uiUnlocked ? '🔓 Unlocked — Click to Lock' : '🔒 Locked — Click to Unlock'}
+              </button>
+              <span style="font-size:11px; color:var(--muted);">${uiUnlocked ? 'Cards can be dragged on other pages right now.' : 'Layout is locked.'}</span>
+            </div>
+            ${uiUnlocked ? `
+              <div style="margin-top:10px; padding-top:8px; border-top:1px solid var(--panelLine);">
+                <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Reset a page back to its default layout</label>
+                <div class="grid-3" style="margin-top:6px;">
+                  ${tabsWithCards.map(t => `
+                    <button class="btn" style="background:var(--panelLine); color:var(--chalk); font-size:10px;" onclick="resetTabLayout('${t.key}')">Reset ${t.label}</button>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+          </div>
+
+          <hr style="border:none; border-top:1px solid var(--panelLine); margin:14px 0;" />
+
+          <!-- Team Branding Section -->
+          <div style="margin-bottom:14px;">
+            <div style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase; margin-bottom:6px;">Team Name & Branding</div>
+            <div class="grid-3">
+              <div>
+                <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Team / School Name</label>
+                <input class="input" value="${branding.teamName}" oninput="branding.teamName = this.value; persist(); applyBranding(branding);" placeholder="e.g. Scorpions Wrestling" />
+              </div>
+              <div>
+                <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Team Text Color</label>
+                <input type="color" class="input" style="height:36px; padding:2px; cursor:pointer;" value="${branding.teamColor}" onchange="branding.teamColor = this.value; persist(); applyBranding(branding);" />
+              </div>
+              <div>
+                <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Font Style</label>
+                <select class="select" onchange="branding.teamFont = this.value; persist(); applyBranding(branding);">
+                  <option value="system-ui, -apple-system, sans-serif" ${branding.teamFont.includes('system-ui') ? 'selected' : ''}>Sans-Serif (Modern)</option>
+                  <option value="Impact, Charcoal, sans-serif" ${branding.teamFont.includes('Impact') ? 'selected' : ''}>Impact (Athletic)</option>
+                  <option value="Georgia, serif" ${branding.teamFont.includes('Georgia') ? 'selected' : ''}>Serif (Classic)</option>
+                  <option value="'Courier New', monospace" ${branding.teamFont.includes('Courier') ? 'selected' : ''}>Monospace (Digital)</option>
+                  <option value="'Trebuchet MS', sans-serif" ${branding.teamFont.includes('Trebuchet') ? 'selected' : ''}>Trebuchet (Bold Clean)</option>
+                </select>
               </div>
             </div>
-          ` : ''}
-        </div>
+          </div>
 
-        <!-- Team Branding Customizer -->
-        <div class="card">
-          <div class="card-title">Team Name & Branding</div>
-          <div class="grid-3" style="margin-bottom:6px;">
-            <div>
-              <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Team / School Name</label>
-              <input class="input" value="${branding.teamName}" oninput="branding.teamName = this.value; persist(); applyBranding(branding);" placeholder="e.g. Scorpions Wrestling" />
-            </div>
-            <div>
-              <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Team Text Color</label>
-              <input type="color" class="input" style="height:36px; padding:2px; cursor:pointer;" value="${branding.teamColor}" onchange="branding.teamColor = this.value; persist(); applyBranding(branding);" />
-            </div>
-            <div>
-              <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Font Style</label>
-              <select class="select" onchange="branding.teamFont = this.value; persist(); applyBranding(branding);">
-                <option value="system-ui, -apple-system, sans-serif" ${branding.teamFont.includes('system-ui') ? 'selected' : ''}>Sans-Serif (Modern)</option>
-                <option value="Impact, Charcoal, sans-serif" ${branding.teamFont.includes('Impact') ? 'selected' : ''}>Impact (Athletic)</option>
-                <option value="Georgia, serif" ${branding.teamFont.includes('Georgia') ? 'selected' : ''}>Serif (Classic)</option>
-                <option value="'Courier New', monospace" ${branding.teamFont.includes('Courier') ? 'selected' : ''}>Monospace (Digital)</option>
-                <option value="'Trebuchet MS', sans-serif" ${branding.teamFont.includes('Trebuchet') ? 'selected' : ''}>Trebuchet (Bold Clean)</option>
-              </select>
+          <hr style="border:none; border-top:1px solid var(--panelLine); margin:14px 0;" />
+
+          <!-- UI Color Palette Theme Section -->
+          <div>
+            <div style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase; margin-bottom:6px;">Custom UI Color Palette Theme</div>
+            <div class="grid-4">
+              <div>
+                <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Mat Background</label>
+                <input type="color" class="input" style="height:36px; padding:2px; cursor:pointer;" value="${customTheme.mat}" onchange="customTheme.mat = this.value; applyTheme(customTheme); persist();" />
+              </div>
+              <div>
+                <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Panel Card</label>
+                <input type="color" class="input" style="height:36px; padding:2px; cursor:pointer;" value="${customTheme.panel}" onchange="customTheme.panel = this.value; applyTheme(customTheme); persist();" />
+              </div>
+              <div>
+                <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Accent Gold</label>
+                <input type="color" class="input" style="height:36px; padding:2px; cursor:pointer;" value="${customTheme.gold}" onchange="customTheme.gold = this.value; applyTheme(customTheme); persist();" />
+              </div>
+              <div>
+                <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Success Green</label>
+                <input type="color" class="input" style="height:36px; padding:2px; cursor:pointer;" value="${customTheme.green}" onchange="customTheme.green = this.value; applyTheme(customTheme); persist();" />
+              </div>
             </div>
           </div>
         </div>
@@ -2269,37 +2962,10 @@
           </div>
         </div>
 
-        <!-- Custom UI Color Palette Settings -->
-        <div class="card">
-          <div class="card-title">Custom UI Color Palette Theme</div>
-          <div class="grid-4" style="margin-bottom:8px;">
-            <div>
-              <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Mat Background</label>
-              <input type="color" class="input" style="height:36px; padding:2px; cursor:pointer;" value="${customTheme.mat}" onchange="customTheme.mat = this.value; applyTheme(customTheme); persist();" />
-            </div>
-            <div>
-              <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Panel Card</label>
-              <input type="color" class="input" style="height:36px; padding:2px; cursor:pointer;" value="${customTheme.panel}" onchange="customTheme.panel = this.value; applyTheme(customTheme); persist();" />
-            </div>
-            <div>
-              <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Accent Gold</label>
-              <input type="color" class="input" style="height:36px; padding:2px; cursor:pointer;" value="${customTheme.gold}" onchange="customTheme.gold = this.value; applyTheme(customTheme); persist();" />
-            </div>
-            <div>
-              <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Success Green</label>
-              <input type="color" class="input" style="height:36px; padding:2px; cursor:pointer;" value="${customTheme.green}" onchange="customTheme.green = this.value; applyTheme(customTheme); persist();" />
-            </div>
-          </div>
-        </div>
-
         <!-- Taxonomy Manager -->
         <div class="card">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
             <div class="card-title" style="margin-bottom:0;">Admin — Manage Move Taxonomy</div>
-            <label style="font-size:11px; color:var(--gold); font-weight:700; display:flex; align-items:center; gap:4px; cursor:pointer;">
-              <input type="checkbox" ${taxonomy.alphabetize ? 'checked' : ''} onchange="taxonomy.alphabetize = this.checked; persist(); render();" />
-              Alphabetize Move Lists
-            </label>
           </div>
 
           <div style="display:flex; gap:6px; margin-bottom:10px;">
@@ -2358,20 +3024,42 @@
           }).join('')}
         </div>
 
-        <!-- Tie Modifiers Manager -->
+        <!-- Tie Modifiers & Finishes Manager -->
         <div class="card">
-          <div class="card-title">Manage Tie Setup Modifiers</div>
-          <div style="display:flex; gap:6px; margin-bottom:10px;">
-            <input id="adm-tie-name" class="input" style="margin-bottom:0;" placeholder="e.g. 2-on-1, Russian Tie" />
-            <button class="btn btn-gold" onclick="adminAddTie()">Add Modifier</button>
+          <div class="card-title">Manage Ties, Setups & Finishes</div>
+          
+          <div style="margin-bottom:12px;">
+            <div style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">Ties & Setups</div>
+            <div style="display:flex; gap:6px; margin-bottom:8px;">
+              <input id="adm-tie-name" class="input" style="margin-bottom:0;" placeholder="e.g. Underhook, Collar Tie" />
+              <button class="btn btn-gold" onclick="adminAddTie()">Add Modifier</button>
+            </div>
+            <div class="grid-3">
+              ${taxonomy.TIE_MODIFIERS.map(tie => `
+                <div class="item-row">
+                  <span>${tie}</span>
+                  <button class="btn btn-red" style="padding:2px 6px; font-size:10px;" onclick="adminDeleteTie('${tie}')">✕</button>
+                </div>
+              `).join('')}
+            </div>
           </div>
-          <div class="grid-3">
-            ${taxonomy.TIE_MODIFIERS.map(tie => `
-              <div class="item-row">
-                <span>${tie}</span>
-                <button class="btn btn-red" style="padding:2px 6px; font-size:10px;" onclick="adminDeleteTie('${tie}')">✕</button>
-              </div>
-            `).join('')}
+
+          <hr style="border:none; border-top:1px solid var(--panelLine); margin:12px 0;" />
+
+          <div>
+            <div style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">Finishes & Counters</div>
+            <div style="display:flex; gap:6px; margin-bottom:8px;">
+              <input id="adm-finish-name" class="input" style="margin-bottom:0;" placeholder="e.g. Inside Trip, Sprawl" />
+              <button class="btn btn-gold" onclick="adminAddFinish()">Add Finish</button>
+            </div>
+            <div class="grid-3">
+              ${(taxonomy.FINISH_MODIFIERS || DEFAULT_TAXONOMY.FINISH_MODIFIERS).map(fin => `
+                <div class="item-row">
+                  <span>${fin}</span>
+                  <button class="btn btn-red" style="padding:2px 6px; font-size:10px;" onclick="adminDeleteFinish('${fin}')">✕</button>
+                </div>
+              `).join('')}
+            </div>
           </div>
         </div>
       `;
@@ -2471,15 +3159,119 @@
       render();
     }
 
+    function adminAddFinish() {
+      const finName = document.getElementById("adm-finish-name").value.trim();
+      if (!finName) return alert("Please enter a finish/counter name.");
+      if (!taxonomy.FINISH_MODIFIERS) taxonomy.FINISH_MODIFIERS = [...DEFAULT_TAXONOMY.FINISH_MODIFIERS];
+      if (!taxonomy.FINISH_MODIFIERS.includes(finName)) {
+        taxonomy.FINISH_MODIFIERS.push(finName);
+      }
+      persist();
+      render();
+    }
+
+    function adminDeleteFinish(fin) {
+      if (!taxonomy.FINISH_MODIFIERS) taxonomy.FINISH_MODIFIERS = [...DEFAULT_TAXONOMY.FINISH_MODIFIERS];
+      taxonomy.FINISH_MODIFIERS = taxonomy.FINISH_MODIFIERS.filter(f => f !== fin);
+      persist();
+      render();
+    }
+
     /* MODAL MANAGERS */
     function openAddSeasonModal() { activeModal = "season"; render(); }
     function openAddBoutModal() { activeModal = "bout"; render(); }
-    function closeModal() { activeModal = null; render(); }
+    function closeModal() { activeModal = null; activeProficiencyDetail = null; activeHelpTopic = null; render(); }
 
     function renderModal() {
       const root = document.getElementById("modal-root");
       if (!activeModal) {
         root.innerHTML = "";
+        return;
+      }
+
+      if (activeModal === "help" && activeHelpTopic) {
+        const text = HELP_CONTENT[activeHelpTopic] || "No help description available.";
+        root.innerHTML = `
+          <div class="modal-overlay" onclick="closeModal()">
+            <div class="modal-box" onclick="event.stopPropagation()">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <div class="card-title" style="margin-bottom:0;">Feature Guide & Explanation</div>
+                <button class="btn-back" onclick="closeModal()">Close</button>
+              </div>
+              <p style="font-size:13px; line-height:1.5; color:var(--chalk); margin-bottom:16px;">
+                ${text}
+              </p>
+              <button class="btn btn-gold" style="width:100%;" onclick="closeModal()">Got It</button>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      if (activeModal === "proficiency-detail" && activeProficiencyDetail) {
+        const activeW = getActiveWrestler();
+        const profStats = statsShowTeam
+          ? computePositionalProficiency(null)
+          : computePositionalProficiency(activeW ? activeW.id : null);
+        
+        const key = activeProficiencyDetail.toLowerCase();
+        const data = profStats[key];
+
+        let descSuccess = "";
+        let descFailure = "";
+        let descOpps = "";
+
+        if (key === "neutral") {
+          descSuccess = "Takedowns scored by wrestler (+1 each)";
+          descFailure = "Takedowns conceded / scored on (+1 each)";
+          descOpps = "Match starts, overtime periods, neutral choices, and escapes";
+        } else if (key === "top") {
+          descSuccess = "Near falls (2/3/4-Pt NF), pins, and offensive turns";
+          descFailure = "Escapes or reversals conceded to opponent";
+          descOpps = "Offensive takedowns, reversals, top choices, and opponent choosing bottom";
+        } else if (key === "bottom") {
+          descSuccess = "Escapes and reversals scored by wrestler";
+          descFailure = "Near falls, pins, and turns conceded to opponent";
+          descOpps = "Takedowns conceded, reversals conceded, bottom choices, and opponent choosing top";
+        }
+
+        root.innerHTML = `
+          <div class="modal-overlay" onclick="closeModal()">
+            <div class="modal-box" onclick="event.stopPropagation()">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <div class="card-title" style="margin-bottom:0;">${activeProficiencyDetail} Position Proficiency</div>
+                <button class="btn-back" onclick="closeModal()">Close</button>
+              </div>
+
+              <div style="background:var(--mat); padding:12px; border-radius:6px; border:1px solid var(--panelLine); margin-bottom:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                  <span style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;">Net Proficiency:</span>
+                  <span style="font-size:24px; font-weight:800; font-family:monospace; color:${data.pct > 0 ? 'var(--green)' : data.pct < 0 ? 'var(--red)' : 'var(--gold)'};">
+                    ${data.pct > 0 ? `+${data.pct}` : data.pct}%
+                  </span>
+                </div>
+                <div style="font-size:10px; color:var(--muted); font-family:monospace; margin-top:2px;">
+                  Formula: (Successes [${data.successes}] - Failures [${data.failures}]) / Opportunities [${data.opps}]
+                </div>
+              </div>
+
+              <div style="display:flex; flex-direction:column; gap:8px; font-size:12px; margin-bottom:14px;">
+                <div class="item-row">
+                  <span><strong>Total Opportunities:</strong> <span style="font-size:11px; color:var(--muted);">${descOpps}</span></span>
+                  <strong style="font-family:monospace; color:var(--gold); font-size:14px;">${data.opps}</strong>
+                </div>
+                <div class="item-row">
+                  <span><strong>Successes (+):</strong> <span style="font-size:11px; color:var(--muted);">${descSuccess}</span></span>
+                  <strong style="font-family:monospace; color:var(--green); font-size:14px;">+${data.successes}</strong>
+                </div>
+                <div class="item-row">
+                  <span><strong>Failures (-):</strong> <span style="font-size:11px; color:var(--muted);">${descFailure}</span></span>
+                  <strong style="font-family:monospace; color:var(--red); font-size:14px;">-${data.failures}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
         return;
       }
 
@@ -2694,6 +3486,7 @@
       if (activeModal === "edit-event" && editingEvent) {
         const allMoves = getAllMovesFlat();
         let currentTies = editingEvent.tie ? editingEvent.tie.split(" + ") : [];
+        const combinedModifiersList = Array.from(new Set([...taxonomy.TIE_MODIFIERS, ...(taxonomy.FINISH_MODIFIERS || DEFAULT_TAXONOMY.FINISH_MODIFIERS)]));
 
         root.innerHTML = `
           <div class="modal-overlay" onclick="closeModal()">
@@ -2726,14 +3519,18 @@
               </select>
 
               <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700; display:block; margin-bottom:4px;">
-                Tie / Setup Modifiers (Click to Add / Remove)
+                Modifiers (Click to Cycle: None → Wrestler → Opponent → None)
               </label>
               <div class="grid-3" style="margin-bottom:12px;">
-                ${taxonomy.TIE_MODIFIERS.map(tie => {
-                  const isSel = currentTies.includes(tie);
+                ${combinedModifiersList.map(mod => {
+                  const isW = currentTies.includes(mod);
+                  const isOpp = currentTies.includes(`Opp: ${mod}`);
+                  let chipClass = "chip";
+                  if (isW) chipClass += " selected-wrestler";
+                  if (isOpp) chipClass += " selected-opponent";
                   return `
-                    <div class="chip ${isSel ? 'selected' : ''}" onclick="toggleEditModalTie('${tie}')">
-                      ${tie}
+                    <div class="${chipClass}" onclick="cycleEditModalTie('${mod}')">
+                      ${mod} ${isOpp ? '[OPP]' : isW ? '[WRESTLER]' : ''}
                     </div>
                   `;
                 }).join('')}
@@ -2760,11 +3557,19 @@
       }
     }
 
-    function toggleEditModalTie(tie) {
+    function cycleEditModalTie(tie) {
       if (!editingEvent) return;
       let ties = editingEvent.tie ? editingEvent.tie.split(" + ") : [];
-      if (ties.includes(tie)) ties = ties.filter(t => t !== tie);
-      else ties.push(tie);
+      const oppLabel = `Opp: ${tie}`;
+
+      if (ties.includes(tie)) {
+        ties = ties.filter(t => t !== tie);
+        ties.push(oppLabel);
+      } else if (ties.includes(oppLabel)) {
+        ties = ties.filter(t => t !== oppLabel);
+      } else {
+        ties.push(tie);
+      }
       editingEvent.tie = ties.join(" + ");
       renderModal();
     }
