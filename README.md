@@ -14,3 +14,7 @@ Upload Match Video from Computer or Youtube
 Manually Score Match
 
 Custom Stats
+
+Create and Assign Awards
+
+Print Schedule, Bout Sheets, Rosters
