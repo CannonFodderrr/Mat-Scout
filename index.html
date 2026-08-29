@@ -181,6 +181,9 @@
     const LAYOUT_STORAGE_KEY = "mat-scout-layout-order-v1";
     const CONFIG_STORAGE_KEY = "mat-scout-config-v8";
     const AWARDS_STORAGE_KEY = "mat-scout-awards-v8";
+    const ROSTER_LIBRARY_KEY = "mat-scout-roster-library-v1";
+    const AI_TRAINING_LIBRARY_KEY = "mat-scout-ai-training-v1";
+    const AI_TRAINING_IDB = "mat-scout-ai-training-videos";
     const SAMPLE_SEASON_ID = "season_sample_2026";
 
     const DEFAULT_WEIGHT_CLASSES = {
@@ -219,14 +222,15 @@
       },
       TIE_MODIFIERS: [
         "Fake", "Overhook", "Underhook", "Over/Under", "Collar Tie", "Inside Tie", "Outside Tie", "Over Tie", "Wrist Control", "Elbow Control", "Russian", "Wrist Pass", "Arm Drag", "2 on 1", "Poor Penetration",
-        "Head Position", "Poor Head Position", "Both Wrists", "Post", "Standing", "Knee"
+        "Head Position", "Poor Head Position", "Both Wrists", "Post", "Standing", "On Knee"
       ],
       FINISH_MODIFIERS: [
         "Inside Trip", "Outside Trip", "Crack Down", "Backside Finish", "Cut to Double", "Dump", "Scramble", "Down Block", "Sprawl", "Whizzer", "Crossface", "Mat Return", "Cut Loose",
-        "Belly Whizzer", "Step Over"
+        "Belly Whizzer", "Step Over",
+        "Arm Chop", "Tight Waist Far Ankle", "Tight Waist Near Ankle", "Spiral Ride", "Far Knee Far Ankle"
       ],
       RIDE_MODIFIERS: [
-        "Single Leg", "Double Leg", "Cross Body", "Iowa", "Blair", "Claw", "Crab", "2 on 1"
+        "Single Leg", "Double Leg", "Cross Body", "Iowa", "Blair", "Claw", "Crab", "2 on 1", "Spiral Ride"
       ]
     };
 
@@ -481,10 +485,13 @@
       individualOffenseThreshold: 50,
       individualDefenseThreshold: 50,
       teamOffenseThreshold: 50,
-      teamDefenseThreshold: 50
+      teamDefenseThreshold: 50,
+      aiTrainOnCommit: false
     };
 
     let awards = [];
+    let rosterLibrary = []; // saved rosters from archived/deleted seasons for later import
+    let aiTrainingLibrary = []; // ground-truth matches for AI scoring examples
 
     let taxonomy = DEFAULT_TAXONOMY;
     let currentTab = "roster";
@@ -492,7 +499,7 @@
     let rosterLevelFilter = "Both"; // Both | Varsity | JV
     let boutDivisionFilter = "All"; // All | Boys | Girls | Hide
     let boutLevelFilter = "Both"; // Both | Varsity | JV
-    let expandedSheetLevel = "Varsity"; // Varsity | JV | Both
+    let expandedSheetLevel = "Varsity"; // Varsity | JV | Exh | Both | All
     let expandedSheetDivision = "Boys"; // Boys | Girls | Both
 
     let scoutMode = "manual";
@@ -584,12 +591,16 @@
           if (!taxonomy.TIE_MODIFIERS.includes("Wrist Pass")) taxonomy.TIE_MODIFIERS.push("Wrist Pass");
           if (!taxonomy.TIE_MODIFIERS.includes("Arm Drag")) taxonomy.TIE_MODIFIERS.push("Arm Drag");
           if (!taxonomy.TIE_MODIFIERS.includes("Poor Penetration")) taxonomy.TIE_MODIFIERS.push("Poor Penetration");
-          ["Head Position", "Poor Head Position", "Both Wrists", "Post", "Standing", "Knee"].forEach(t => {
+          ["Head Position", "Poor Head Position", "Both Wrists", "Post", "Standing", "On Knee"].forEach(t => {
             if (!taxonomy.TIE_MODIFIERS.includes(t)) taxonomy.TIE_MODIFIERS.push(t);
           });
-          ["Belly Whizzer", "Step Over"].forEach(f => {
+          // Rename legacy "Knee" → "On Knee"
+          taxonomy.TIE_MODIFIERS = taxonomy.TIE_MODIFIERS.map(t => t === "Knee" ? "On Knee" : t);
+          taxonomy.TIE_MODIFIERS = Array.from(new Set(taxonomy.TIE_MODIFIERS));
+          ["Belly Whizzer", "Step Over", "Arm Chop", "Tight Waist Far Ankle", "Tight Waist Near Ankle", "Spiral Ride", "Far Knee Far Ankle"].forEach(f => {
             if (!taxonomy.FINISH_MODIFIERS.includes(f)) taxonomy.FINISH_MODIFIERS.push(f);
           });
+          if (!taxonomy.RIDE_MODIFIERS.includes("Spiral Ride")) taxonomy.RIDE_MODIFIERS.push("Spiral Ride");
           if (taxonomy.MOVE_GROUPS && taxonomy.MOVE_GROUPS.Penalty && !taxonomy.MOVE_GROUPS["Penalty/DQ"]) {
             taxonomy.MOVE_GROUPS["Penalty/DQ"] = taxonomy.MOVE_GROUPS.Penalty;
             delete taxonomy.MOVE_GROUPS.Penalty;
@@ -644,7 +655,8 @@
             individualOffenseThreshold: parsed.individualOffenseThreshold ?? parsed.individualPlanThreshold ?? 50,
             individualDefenseThreshold: parsed.individualDefenseThreshold ?? parsed.individualPlanThreshold ?? 50,
             teamOffenseThreshold: parsed.teamOffenseThreshold ?? parsed.teamPlanThreshold ?? 50,
-            teamDefenseThreshold: parsed.teamDefenseThreshold ?? parsed.teamPlanThreshold ?? 50
+            teamDefenseThreshold: parsed.teamDefenseThreshold ?? parsed.teamPlanThreshold ?? 50,
+            aiTrainOnCommit: !!parsed.aiTrainOnCommit
           };
         }
 
@@ -672,6 +684,16 @@
             const { wrestlerId, wrestlerIds, ...rest } = aw;
             return { ...rest, assignments };
           });
+        }
+
+        const savedRosterLib = localStorage.getItem(ROSTER_LIBRARY_KEY);
+        if (savedRosterLib) {
+          try { rosterLibrary = JSON.parse(savedRosterLib) || []; } catch (e) { rosterLibrary = []; }
+        }
+
+        const savedTrain = localStorage.getItem(AI_TRAINING_LIBRARY_KEY);
+        if (savedTrain) {
+          try { aiTrainingLibrary = JSON.parse(savedTrain) || []; } catch (e) { aiTrainingLibrary = []; }
         }
 
         const savedLayout = localStorage.getItem(LAYOUT_STORAGE_KEY);
@@ -710,12 +732,183 @@
         localStorage.setItem(COLOR_THEME_STORAGE_KEY, JSON.stringify(customTheme));
         localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(appConfig));
         localStorage.setItem(AWARDS_STORAGE_KEY, JSON.stringify(awards));
+        localStorage.setItem(ROSTER_LIBRARY_KEY, JSON.stringify(rosterLibrary));
+        localStorage.setItem(AI_TRAINING_LIBRARY_KEY, JSON.stringify(aiTrainingLibrary));
         localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(layoutOrder));
       } catch (err) {}
     }
 
     function getActiveSeason() {
       return store.seasons.find(s => s.id === store.activeSeasonId) || store.seasons[0];
+    }
+
+    function getSeasonYearLabelSafe(season) {
+      try {
+        if (typeof getSeasonYearLabel === "function") return getSeasonYearLabel(season);
+      } catch (e) {}
+      const n = (season && season.name) || "";
+      const m = String(n).match(/20\d{2}/);
+      return m ? m[0] : String(new Date().getFullYear());
+    }
+
+    /** Download a full season archive as a JSON file (browser "folder"/file save). */
+    function archiveSeason(seasonId) {
+      const season = store.seasons.find(s => s.id === seasonId);
+      if (!season) return alert("Season not found.");
+      const payload = {
+        type: "mat-scout-season-archive",
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        season: JSON.parse(JSON.stringify(season)),
+        // HOF stays global; include assignment context for reference only
+        awardsSnapshot: JSON.parse(JSON.stringify(awards || []))
+      };
+      const safeName = String(season.name || "season").replace(/[^a-z0-9-_]+/gi, "_").slice(0, 40);
+      const fname = `mat-scout-archive_${safeName}_${getSeasonYearLabelSafe(season)}.json`;
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fname;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      alert(`Archived "${season.name}" to download: ${fname}\n\nKeep this file to reload the season later.`);
+    }
+
+    function archiveActiveSeason() {
+      const s = getActiveSeason();
+      if (!s) return alert("No active season.");
+      archiveSeason(s.id);
+    }
+
+    /** Load a previously downloaded season archive JSON. */
+    function loadSeasonArchiveFromFile(file) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          let season = data.season || data;
+          if (!season || !season.name) throw new Error("Invalid archive file.");
+          season = JSON.parse(JSON.stringify(season));
+
+          const oldWrestlerIds = {};
+          const oldBoutIds = {};
+          const oldMatchIds = {};
+
+          season.id = Math.random().toString(36).slice(2, 9);
+          season.roster = (season.roster || []).map(w => {
+            const nid = Math.random().toString(36).slice(2, 9);
+            oldWrestlerIds[w.id] = nid;
+            return { ...w, id: nid };
+          });
+          season.bouts = (season.bouts || []).map(b => {
+            const nid = Math.random().toString(36).slice(2, 9);
+            oldBoutIds[b.id] = nid;
+            return { ...b, id: nid };
+          });
+          season.matches = (season.matches || []).map(m => {
+            const nid = Math.random().toString(36).slice(2, 9);
+            oldMatchIds[m.id] = nid;
+            return {
+              ...m,
+              id: nid,
+              wrestlerId: oldWrestlerIds[m.wrestlerId] || m.wrestlerId,
+              boutId: oldBoutIds[m.boutId] || m.boutId
+            };
+          });
+          season.events = (season.events || []).map(e => ({
+            ...e,
+            id: Math.random().toString(36).slice(2, 9),
+            wrestlerId: oldWrestlerIds[e.wrestlerId] || e.wrestlerId,
+            boutId: oldBoutIds[e.boutId] || e.boutId,
+            matchId: oldMatchIds[e.matchId] || e.matchId
+          }));
+          if (!season.boysDualRecord) season.boysDualRecord = { wins: 0, losses: 0, ties: 0 };
+          if (!season.girlsDualRecord) season.girlsDualRecord = { wins: 0, losses: 0, ties: 0 };
+
+          // Ensure unique name if collision
+          let base = season.name;
+          let n = 2;
+          while (store.seasons.some(s => s.name === season.name)) {
+            season.name = base + " (restored " + n + ")";
+            n++;
+          }
+
+          store.seasons.push(season);
+          store.activeSeasonId = season.id;
+          store.activeBoutId = "all";
+          store.activeWrestlerId = season.roster[0] ? season.roster[0].id : null;
+          persist();
+          render();
+          alert(`Loaded archived season "${season.name}" (${season.roster.length} athletes, ${(season.matches || []).length} matches).`);
+        } catch (err) {
+          alert("Could not load archive: " + (err.message || err));
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function triggerLoadSeasonArchive() {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "application/json,.json";
+      input.onchange = () => {
+        if (input.files && input.files[0]) loadSeasonArchiveFromFile(input.files[0]);
+      };
+      input.click();
+    }
+
+    /**
+     * Delete a season from active storage.
+     * Hall of Fame (awards) is global and kept.
+     * Roster is saved to rosterLibrary for optional import into a future season (not shown as a live season).
+     */
+    function deleteSeason(seasonId) {
+      const season = store.seasons.find(s => s.id === seasonId);
+      if (!season) return;
+      if (store.seasons.length <= 1) {
+        return alert("You cannot delete the only remaining season. Create or load another season first.");
+      }
+      const matchCount = (season.matches || []).length;
+      const eventCount = (season.events || []).length;
+      const msg =
+        `Delete season "${season.name}"?\n\n` +
+        `• ${season.roster.length} roster athlete(s) will be saved to the Roster Library for later import\n` +
+        `• ${matchCount} match(es) and ${eventCount} event(s) will be removed from this device\n` +
+        `• Hall of Fame awards are kept\n\n` +
+        `Tip: Archive/download the season first if you may need the full stats later.`;
+      if (!confirm(msg)) return;
+
+      // Preserve roster for future season import
+      if (season.roster && season.roster.length) {
+        rosterLibrary.push({
+          id: Math.random().toString(36).slice(2, 9),
+          label: season.name,
+          year: getSeasonYearLabelSafe(season),
+          savedAt: new Date().toISOString(),
+          roster: JSON.parse(JSON.stringify(season.roster))
+        });
+      }
+
+      store.seasons = store.seasons.filter(s => s.id !== seasonId);
+      if (store.activeSeasonId === seasonId) {
+        store.activeSeasonId = store.seasons[0].id;
+        store.activeBoutId = "all";
+        store.activeWrestlerId = store.seasons[0].roster[0] ? store.seasons[0].roster[0].id : null;
+      }
+      persist();
+      render();
+      alert(`Season deleted. Roster saved to library (${rosterLibrary.length} saved roster(s) available for import).`);
+    }
+
+    function deleteRosterLibraryEntry(libId) {
+      if (!confirm("Remove this saved roster from the library?")) return;
+      rosterLibrary = rosterLibrary.filter(r => r.id !== libId);
+      persist();
+      render();
     }
 
     function getActiveWrestler() {
@@ -2075,7 +2268,7 @@
               </button>
             </div>
           </div>
-          <div class="grid-3">
+          <div class="grid-4">
             ${activeList.map(mod => {
               const matchedMod = activeTieModifiers.find(m => (typeof m === 'object' ? m.tie : m) === mod);
               let chipClass = "chip";
@@ -2125,6 +2318,18 @@
               </div>
             `).join('')}
           </div>
+
+          <label style="display:flex; align-items:flex-start; gap:8px; margin:10px 0 12px 0; font-size:12px; color:var(--chalk); cursor:pointer;">
+            <input type="checkbox" style="margin-top:3px;" ${appConfig.aiTrainOnCommit ? 'checked' : ''}
+              onchange="appConfig.aiTrainOnCommit = this.checked; persist();" />
+            <span>
+              <strong style="color:var(--gold);">Add to AI training library</strong>
+              <span style="color:var(--muted); display:block; font-size:11px; margin-top:2px;">
+                When checked, this match’s scoring log (and video reference — YouTube link or local file copy) is saved for future AI scoring examples.
+                Library size: ${aiTrainingLibrary.length} example(s).
+              </span>
+            </span>
+          </label>
 
           <div class="grid-2">
             <button class="btn btn-green" onclick="commitManualMatch()">Save & Commit Match to Stats</button>
@@ -2597,13 +2802,209 @@
       render();
     }
 
-    function commitManualMatch() {
+
+    /* ===== AI TRAINING LIBRARY ===== */
+    function openAiTrainingDb() {
+      return new Promise((resolve, reject) => {
+        if (!window.indexedDB) return reject(new Error("IndexedDB not available"));
+        const req = indexedDB.open(AI_TRAINING_IDB, 1);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains("videos")) db.createObjectStore("videos");
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error || new Error("IDB open failed"));
+      });
+    }
+
+    async function idbPutTrainingVideo(exampleId, blob) {
+      if (!blob || !exampleId) return false;
+      try {
+        const db = await openAiTrainingDb();
+        return await new Promise((resolve, reject) => {
+          const tx = db.transaction("videos", "readwrite");
+          tx.objectStore("videos").put(blob, exampleId);
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => reject(tx.error);
+        });
+      } catch (e) {
+        console.warn("Could not store training video blob", e);
+        return false;
+      }
+    }
+
+    async function idbGetTrainingVideo(exampleId) {
+      try {
+        const db = await openAiTrainingDb();
+        return await new Promise((resolve, reject) => {
+          const tx = db.transaction("videos", "readonly");
+          const req = tx.objectStore("videos").get(exampleId);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => reject(req.error);
+        });
+      } catch (e) {
+        return null;
+      }
+    }
+
+    async function idbDeleteTrainingVideo(exampleId) {
+      try {
+        const db = await openAiTrainingDb();
+        return await new Promise((resolve, reject) => {
+          const tx = db.transaction("videos", "readwrite");
+          tx.objectStore("videos").delete(exampleId);
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => reject(tx.error);
+        });
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function buildTrainingExampleFromActiveMatch() {
+      if (!activeMatch) return null;
+      const season = getActiveSeason();
+      const w = season.roster.find(r => r.id === activeMatch.wrestlerId);
+      const bout = season.bouts.find(b => b.id === activeMatch.boutId);
+      const events = JSON.parse(JSON.stringify(activeMatch.events || []));
+      const result = classifyMatchResult(events);
+
+      let video = { type: "none" };
+      if (videoSourceType === "youtube" && youtubeVideoId) {
+        video = {
+          type: "youtube",
+          youtubeId: youtubeVideoId,
+          youtubeUrl: "https://www.youtube.com/watch?v=" + youtubeVideoId,
+          fileName: videoFileName || ("YouTube [" + youtubeVideoId + "]")
+        };
+      } else if (videoSourceType === "file" && (selectedVideoFile || videoBlobUrl)) {
+        video = {
+          type: "file",
+          fileName: videoFileName || (selectedVideoFile && selectedVideoFile.name) || "local-video",
+          mimeType: (selectedVideoFile && selectedVideoFile.type) || "video/mp4",
+          hasLocalBlob: true
+        };
+      }
+
+      return {
+        id: Math.random().toString(36).slice(2, 10),
+        savedAt: new Date().toISOString(),
+        seasonId: season.id,
+        seasonName: season.name,
+        wrestlerId: activeMatch.wrestlerId,
+        wrestlerName: w ? w.name : "",
+        weightClass: w ? w.weightClass : "",
+        division: w ? w.division : "",
+        boutId: activeMatch.boutId,
+        boutLabel: bout ? ((bout.date || "") + " vs " + (bout.opponentTeam || "")) : "",
+        opponent: activeMatch.opponent,
+        level: activeMatch.level,
+        date: activeMatch.date,
+        source: "manual",
+        events,
+        result: {
+          ourP: result.ourP,
+          oppP: result.oppP,
+          outcome: result.result,
+          method: result.method
+        },
+        video
+      };
+    }
+
+    async function saveActiveMatchToAiTrainingLibrary() {
+      const example = buildTrainingExampleFromActiveMatch();
+      if (!example) return { ok: false, reason: "no match" };
+
+      // Store local file blob in IndexedDB when available
+      if (example.video && example.video.type === "file" && selectedVideoFile) {
+        const stored = await idbPutTrainingVideo(example.id, selectedVideoFile);
+        example.video.hasLocalBlob = !!stored;
+        if (!stored) {
+          example.video.note = "Video file could not be stored in IndexedDB (quota or browser limit). Event labels were still saved.";
+        }
+      } else if (example.video && example.video.type === "file" && videoBlobUrl && !selectedVideoFile) {
+        // Try fetch blob from object URL
+        try {
+          const resp = await fetch(videoBlobUrl);
+          const blob = await resp.blob();
+          const stored = await idbPutTrainingVideo(example.id, blob);
+          example.video.hasLocalBlob = !!stored;
+        } catch (e) {
+          example.video.hasLocalBlob = false;
+          example.video.note = "Local video blob unavailable to store; labels saved.";
+        }
+      }
+
+      aiTrainingLibrary.push(example);
+      try {
+        localStorage.setItem(AI_TRAINING_LIBRARY_KEY, JSON.stringify(aiTrainingLibrary));
+      } catch (e) {
+        // quota — drop video refs and retry metadata only
+        example.video = example.video && example.video.type === "youtube" ? example.video : { type: "none", note: "Storage full; video omitted" };
+        aiTrainingLibrary[aiTrainingLibrary.length - 1] = example;
+        try {
+          localStorage.setItem(AI_TRAINING_LIBRARY_KEY, JSON.stringify(aiTrainingLibrary));
+        } catch (e2) {
+          aiTrainingLibrary.pop();
+          return { ok: false, reason: "storage_full" };
+        }
+      }
+      return { ok: true, example };
+    }
+
+    function exportAiTrainingLibrary() {
+      const payload = {
+        type: "mat-scout-ai-training-library",
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        count: aiTrainingLibrary.length,
+        examples: aiTrainingLibrary
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "mat-scout-ai-training-library.json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    async function clearAiTrainingLibrary() {
+      if (!aiTrainingLibrary.length) return alert("Training library is empty.");
+      if (!confirm("Clear the entire AI training library (" + aiTrainingLibrary.length + " examples)? Local video copies will also be removed.")) return;
+      const ids = aiTrainingLibrary.map(e => e.id);
+      aiTrainingLibrary = [];
+      persist();
+      for (const id of ids) await idbDeleteTrainingVideo(id);
+      render();
+      alert("AI training library cleared.");
+    }
+
+
+    async function commitManualMatch() {
       if (!activeMatch) return;
       if (!activeMatch.boutId || activeMatch.boutId === "all") {
         alert("This match is not linked to an event. Select a dual or tournament, then re-score the match.");
         return;
       }
       const season = getActiveSeason();
+      const trainOn = !!(appConfig && appConfig.aiTrainOnCommit);
+
+      let trainMsg = "";
+      if (trainOn) {
+        const res = await saveActiveMatchToAiTrainingLibrary();
+        if (res.ok) {
+          const v = res.example.video || {};
+          const vNote = v.type === "youtube" ? "YouTube linked" : (v.type === "file" ? (v.hasLocalBlob ? "local video stored" : "labels only (video not stored)") : "no video");
+          trainMsg = "\n\nAI training library: example saved (" + aiTrainingLibrary.length + " total · " + vNote + ").";
+        } else if (res.reason === "storage_full") {
+          trainMsg = "\n\nWarning: could not save to AI training library (storage full). Match stats were still committed.";
+        }
+      }
+
       season.matches.push({
         id: activeMatch.id,
         wrestlerId: activeMatch.wrestlerId,
@@ -2616,6 +3017,9 @@
       season.events.push(...activeMatch.events);
       activeMatch = null;
       persist();
+      if (trainMsg) {
+        alert("Match committed to stats." + trainMsg);
+      }
       switchTab("sheet");
     }
 
@@ -3011,27 +3415,21 @@
     function renderCalGrapplerExpandedSheet() {
       const season = getActiveSeason();
       const activeBout = getActiveBout();
-      // Weight classes follow selected division (Boys / Girls / Both → use active bout or boys default)
-      let divisionForWeights = expandedSheetDivision;
-      if (divisionForWeights === "Both") {
-        divisionForWeights = (activeBout && activeBout.division) ? activeBout.division : "Boys";
-      }
-      const currentWeights = (weightClasses[divisionForWeights] || weightClasses.Boys || []).slice();
 
-      const levelOk = (lvl) => {
-        if (expandedSheetLevel === "Both") return true;
-        return (lvl || "Varsity") === expandedSheetLevel;
-      };
       const divisionOk = (div) => {
         if (expandedSheetDivision === "Both") return true;
         return (div || "Boys") === expandedSheetDivision;
       };
+      const levelOk = (lvl) => {
+        const L = lvl || "Varsity";
+        if (expandedSheetLevel === "All") return true;
+        if (expandedSheetLevel === "Both") return L === "Varsity" || L === "JV";
+        if (expandedSheetLevel === "Exh") return L === "Exh" || L === "Exhibition";
+        return L === expandedSheetLevel;
+      };
 
-      let cumHomeTeamPts = 0;
-      let cumOppTeamPts = 0;
-
-      // Collect matches for this bout matching filters
-      const boutMatches = season.matches.filter(m => {
+      // All matches for active bout matching filters (supports duplicate weights + Exh)
+      let matches = (season.matches || []).filter(m => {
         if (store.activeBoutId !== "all" && m.boutId !== store.activeBoutId) return false;
         if (!levelOk(m.level)) return false;
         const w = season.roster.find(r => r.id === m.wrestlerId);
@@ -3040,98 +3438,115 @@
         return true;
       });
 
-      const rows = currentWeights.map(weight => {
-        const preferLevel = expandedSheetLevel === "JV" ? "JV" : "Varsity";
-        const ourW = season.roster.find(w =>
-          w.weightClass === weight &&
-          divisionOk(w.division) &&
-          (expandedSheetLevel === "Both"
-            ? (w.level === "Varsity" || w.level === "JV")
-            : w.level === preferLevel)
-        ) || season.roster.find(w =>
-          w.weightClass === weight && divisionOk(w.division) && levelOk(w.level)
-        );
-        const match = boutMatches.find(m => ourW && m.wrestlerId === ourW.id)
-          || boutMatches.find(m => {
-            const w = season.roster.find(r => r.id === m.wrestlerId);
-            return w && String(w.weightClass) === String(weight);
-          });
+      matches = matches.map(m => {
+        const ourW = season.roster.find(r => r.id === m.wrestlerId);
+        const wt = ourW ? Number(ourW.weightClass) || 0 : 0;
+        return { ...m, ourW, sortWt: wt };
+      }).sort((a, b) => {
+        if (a.sortWt !== b.sortWt) return a.sortWt - b.sortWt;
+        const la = a.level || "";
+        const lb = b.level || "";
+        if (la !== lb) return la.localeCompare(lb);
+        const na = (a.ourW && a.ourW.name) || "";
+        const nb = (b.ourW && b.ourW.name) || "";
+        return na.localeCompare(nb);
+      });
 
-        const oppW = activeBout && activeBout.opponentRoster ? activeBout.opponentRoster.find(o => o.weightClass === weight) : null;
-        const oppName = match ? match.opponent : (oppW ? oppW.name : "FORFEIT");
+      let cumHomeTeamPts = 0;
+      let cumOppTeamPts = 0;
 
-        let p1Score = "—", p2Score = "—", p3Score = "—", fallTime = "—", matchScore = "—", homeDualPt = "", oppDualPt = "";
+      const rows = matches.length === 0
+        ? `<tr><td colspan="9" style="text-align:center; color:var(--muted); padding:16px;">No matches match these filters.</td></tr>`
+        : matches.map(m => {
+            const ourW = m.ourW;
+            const weight = ourW ? ourW.weightClass : "—";
+            const level = m.level || "Varsity";
+            const countsTeamPts = level === "Varsity"; // JV / Exh do not add dual points
 
-        if (match) {
-          const matchEvs = season.events.filter(e => e.matchId === match.id);
-          
-          const symbolMap = (e) => {
-            const who = e.direction === "offense" ? "H" : "V";
-            if (e.category === "Choice") {
-              return `[${who}:${e.detail || e.move}]`;
-            }
-            let sym = "T3";
-            if (e.category === "Escape") sym = "E1";
-            else if (e.category === "Reversal") sym = "R2";
-            else if (e.detail && e.detail.includes("2-Point")) sym = "N2";
-            else if (e.detail && e.detail.includes("3-Point")) sym = "N3";
-            else if (e.detail && e.detail.includes("4-Point")) sym = "N4";
-            else if (isPenaltyCategory(e.category)) sym = "P1";
-            return `${who}:${sym}`;
-          };
+            let p1Score = "—", p2Score = "—", p3Score = "—", fallTime = "—", matchScore = "—";
+            let homeDualPt = "", oppDualPt = "";
 
-          const filterPeriodEvents = (p) => {
-            return matchEvs.filter(e => {
+            const matchEvs = season.events.filter(e => e.matchId === m.id);
+
+            const symbolMap = (e) => {
+              const who = e.direction === "offense" ? "H" : "V";
+              if (e.category === "Choice") return `[${who}:${e.detail || e.move}]`;
+              let sym = "T3";
+              if (e.category === "Escape") sym = "E1";
+              else if (e.category === "Reversal") sym = "R2";
+              else if (e.detail && e.detail.includes("2-Point")) sym = "N2";
+              else if (e.detail && e.detail.includes("3-Point")) sym = "N3";
+              else if (e.detail && e.detail.includes("4-Point")) sym = "N4";
+              else if (isPinLikeEvent(e)) sym = "FALL";
+              else if (isPenaltyCategory(e.category)) sym = e.points === 2 ? "P2" : "P1";
+              else if (e.category === "Turns" && e.detail && e.detail.includes("Point")) {
+                if (e.detail.includes("2")) sym = "N2";
+                else if (e.detail.includes("3")) sym = "N3";
+                else if (e.detail.includes("4")) sym = "N4";
+              }
+              return `${who}:${sym}`;
+            };
+
+            const filterPeriodEvents = (p) => matchEvs.filter(e => {
               if (e.period !== p) return false;
               if (e.category === "Choice") return true;
               if (isPenaltyCategory(e.category)) return true;
               if (e.direction === "offense" && e.outcome === "success") return true;
               if (e.direction === "defense" && e.outcome === "fail") return true;
+              if (isPinLikeEvent(e)) return true;
               return false;
             });
-          };
 
-          const p1Evs = filterPeriodEvents("P1");
-          const p2Evs = filterPeriodEvents("P2");
-          const p3Evs = filterPeriodEvents("P3");
+            const fmtPeriod = (p) => {
+              const pe = filterPeriodEvents(p);
+              if (!pe.length) return "—";
+              return pe.map(symbolMap).join(" ");
+            };
+            p1Score = fmtPeriod("P1");
+            p2Score = fmtPeriod("P2");
+            p3Score = fmtPeriod("P3");
 
-          p1Score = p1Evs.map(symbolMap).join(", ") || "0-0";
-          p2Score = p2Evs.map(symbolMap).join(", ") || "—";
-          p3Score = p3Evs.map(symbolMap).join(", ") || "—";
+            const r = classifyMatchResult(matchEvs);
+            const ourP = r.ourP, oppP = r.oppP;
+            const pinEv = r.pinEv;
 
-          const r = classifyMatchResult(matchEvs);
-          const ourP = r.ourP, oppP = r.oppP;
-          const pinEv = r.pinEv;
+            if (r.method === "pin" && r.result === "win") {
+              fallTime = (pinEv && pinEv.timestamp) || "FALL";
+              matchScore = "FALL";
+            } else if (r.method === "pin" && r.result === "loss") {
+              fallTime = (pinEv && pinEv.timestamp) || "DEF FALL";
+              matchScore = "FALL";
+            } else if (r.method === "forfeit" || r.method === "dq") {
+              fallTime = r.method === "dq" ? "DQ" : "FORF";
+              matchScore = r.result === "win" ? (r.method === "dq" ? "DQ WIN" : "FORFEIT WIN") : (r.method === "dq" ? "DQ LOSS" : "FORFEIT LOSS");
+            } else if (r.result === "tie") {
+              matchScore = `${ourP} - ${oppP} TIE`;
+            } else {
+              matchScore = `${ourP} - ${oppP}`;
+            }
 
-          if (r.method === "pin" && r.result === "win") {
-            fallTime = (pinEv && pinEv.timestamp) || "FALL";
-            matchScore = "FALL";
-          } else if (r.method === "pin" && r.result === "loss") {
-            fallTime = (pinEv && pinEv.timestamp) || "DEF FALL";
-            matchScore = "FALL";
-          } else if (r.method === "forfeit") {
-            fallTime = "FORF";
-            matchScore = r.result === "win" ? "FORFEIT WIN" : "FORFEIT LOSS";
-          } else if (r.result === "tie") {
-            matchScore = `${ourP} - ${oppP} TIE`;
-          } else {
-            matchScore = `${ourP} - ${oppP}`;
-          }
+            if (countsTeamPts) {
+              if (r.dualPtsOur > 0) {
+                cumHomeTeamPts += r.dualPtsOur;
+                homeDualPt = String(cumHomeTeamPts);
+              }
+              if (r.dualPtsOpp > 0) {
+                cumOppTeamPts += r.dualPtsOpp;
+                oppDualPt = String(cumOppTeamPts);
+              }
+            } else {
+              homeDualPt = "—";
+              oppDualPt = "—";
+            }
 
-          if (r.dualPtsOur > 0) {
-            cumHomeTeamPts += r.dualPtsOur;
-            homeDualPt = String(cumHomeTeamPts);
-          }
-          if (r.dualPtsOpp > 0) {
-            cumOppTeamPts += r.dualPtsOpp;
-            oppDualPt = String(cumOppTeamPts);
-          }
-        }
-
-        return `
-          <tr>
+            return `
+          <tr style="cursor:pointer;" title="View match log" onclick="openMatchLog('${m.id}')">
             <td style="text-align:center; font-weight:800;">${weight}</td>
-            <td><strong>Home:</strong> ${ourW ? ourW.name : 'FORFEIT'}<br/><strong>Opp:</strong> ${oppName}</td>
+            <td>
+              <strong>Home:</strong> ${ourW ? ourW.name : 'Unknown'}
+              <span style="color:var(--muted); font-size:10px;"> (${level})</span>
+              <br/><strong>Opp:</strong> ${m.opponent || "—"}
+            </td>
             <td>${p1Score}</td>
             <td>${p2Score}</td>
             <td>${p3Score}</td>
@@ -3141,10 +3556,13 @@
             <td style="text-align:center; font-weight:800; color:var(--red);">${oppDualPt}</td>
           </tr>
         `;
-      }).join('');
+          }).join("");
+
+      const filterNote = `Level: ${expandedSheetLevel} · Division: ${expandedSheetDivision} · ${matches.length} match(es)`;
 
       return `
         <div style="overflow-x:auto;">
+          <div style="font-size:11px; color:var(--muted); margin-bottom:8px;">${filterNote} · Duplicate weights listed separately · Exh/JV show no dual points</div>
           <table class="cg-table">
             <thead>
               <tr>
@@ -3180,6 +3598,7 @@
         </div>
       `;
     }
+
 
     /* FULL SYMMETRIC STATS & TRAINING PLAN */
     function computeStatsWithTieBreakdown(wrestlerId) {
@@ -3526,10 +3945,12 @@
       return athletes.map(a => `${a.name} (${a.weightClass} lbs)`).join(", ");
     }
 
-    function buildLeaderboardPodium(items) {
+    function buildLeaderboardPodium(items, valColor) {
       if (!items || items.length === 0) {
         return '<p style="font-size:11px; color:var(--muted); padding:4px 0;">No athlete records logged.</p>';
       }
+
+      const numColor = valColor || "var(--green)";
 
       // Group into distinct ranks
       const scoreMap = new Map();
@@ -3549,7 +3970,7 @@
           <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.03);">
             <span style="font-weight:700; color:var(--gold);">${medals[i]}:</span>
             <span style="flex:1; margin:0 8px; color:var(--chalk); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${formatTiedNames(athletes)}</span>
-            <span style="font-family:monospace; font-weight:800; color:var(--green);">${athletes[0].displayVal != null ? athletes[0].displayVal : val}</span>
+            <span style="font-family:monospace; font-weight:800; color:${numColor};">${athletes[0].displayVal != null ? athletes[0].displayVal : val}</span>
           </div>
         `);
       }
@@ -3564,12 +3985,36 @@
       return Object.values(group).flat();
     }
 
-    function countMoveSuccesses(wrestlerId, category, move, direction) {
+    function countMoveSuccesses(wrestlerId, category, move, direction, mode) {
+      // mode: "success" (default) | "scored_on" (opponent scored on this wrestler)
       const season = getActiveSeason();
+      const scoredOn = mode === "scored_on";
       return season.events.filter(e => {
         if (e.wrestlerId !== wrestlerId) return false;
         if (store.activeBoutId !== "all" && e.boutId !== store.activeBoutId) return false;
         if (e.direction !== direction) return false;
+
+        if (scoredOn) {
+          // Events logged as defense where opponent converted (outcome fail) or we were pinned
+          if (category === "Pins") {
+            return (e.detail === "Pin / Fall" || e.detail === "Pin" || (e.move && e.move.includes("Pin")));
+          }
+          if (category === "Near Fall / Pin") {
+            const isPin = e.detail === "Pin / Fall" || e.detail === "Pin" || (e.move && e.move.includes("Pin"));
+            // NF scored on us: defense + fail with NF points, or Near Fall category
+            const isNf = (e.category === "Near Fall / Pin" || e.category === "Turns") && !isPin;
+            if (!isNf) return false;
+            if (e.outcome !== "fail") return false;
+            if (move && e.move !== move && e.detail !== move) return false;
+            return true;
+          }
+          // Generic: opponent scored this category on us
+          if (e.category !== category) return false;
+          if (e.outcome !== "fail") return false;
+          if (move && e.move !== move) return false;
+          return true;
+        }
+
         if (e.outcome !== "success") return false;
         if (category === "Pins") {
           return (e.detail === "Pin / Fall" || e.detail === "Pin" || (e.move && e.move.includes("Pin")));
@@ -3603,8 +4048,10 @@
     function renderLeaderboardView() {
       const season = getActiveSeason();
       const filteredAthletes = season.roster.filter(w => leaderboardDivision === "All" || w.division === leaderboardDivision);
-      const dir = leaderboardSide === "defense" ? "defense" : "offense";
       const isOff = leaderboardSide === "offense";
+      // Offense = our scoring success. Scored On = opponent converted against us (defense + fail).
+      const dir = isOff ? "offense" : "defense";
+      const countMode = isOff ? "success" : "scored_on";
 
       const categoryBoxes = isOff
         ? [
@@ -3613,15 +4060,16 @@
             { key: "Reversal", label: "Reversals (R2)", expandable: true },
             { key: "Near Fall / Pin", label: "Near Fall Exposures", expandable: true },
             { key: "Pins", label: "Pins / Falls", expandable: false },
-            { key: "Turns", label: "Turns", expandable: true }
+            { key: "Turns", label: "Turns", expandable: true },
+            { key: "ShotPct", label: "Shot %", expandable: false }
           ]
         : [
-            { key: "Takedown", label: "Takedowns Faced", expandable: true },
-            { key: "Escape", label: "Escapes Faced", expandable: true },
-            { key: "Reversal", label: "Reversals Faced", expandable: true },
-            { key: "Near Fall / Pin", label: "Near Falls Faced", expandable: true },
-            { key: "Pins", label: "Pins / Falls Faced", expandable: false },
-            { key: "Turns", label: "Turns Faced", expandable: true }
+            { key: "Takedown", label: "Takedowns Scored On", expandable: true },
+            { key: "Escape", label: "Escapes Allowed", expandable: true },
+            { key: "Reversal", label: "Reversals Allowed", expandable: true },
+            { key: "Near Fall / Pin", label: "Near Falls Scored On", expandable: true },
+            { key: "Pins", label: "Pins / Falls Scored On", expandable: false },
+            { key: "Turns", label: "Turns Scored On", expandable: true }
           ];
 
       // Aggregate category leaders
@@ -3629,12 +4077,19 @@
         const leaders = [];
         filteredAthletes.forEach(w => {
           let val = 0;
+          if (box.key === "ShotPct") {
+            const sp = computeShotPercentage(w.id);
+            if (sp.taken >= 2 && sp.pct != null) {
+              leaders.push({ ...w, val: sp.pct, displayVal: sp.pct + "% (" + sp.success + "/" + sp.taken + ")" });
+            }
+            return;
+          }
           if (box.key === "Pins") {
-            val = countMoveSuccesses(w.id, "Pins", null, dir);
+            val = countMoveSuccesses(w.id, "Pins", null, dir, countMode);
           } else if (box.key === "Near Fall / Pin") {
-            val = countMoveSuccesses(w.id, "Near Fall / Pin", null, dir);
+            val = countMoveSuccesses(w.id, "Near Fall / Pin", null, dir, countMode);
           } else {
-            val = countMoveSuccesses(w.id, box.key, null, dir);
+            val = countMoveSuccesses(w.id, box.key, null, dir, countMode);
           }
           if (val > 0) leaders.push({ ...w, val });
         });
@@ -3647,13 +4102,13 @@
           const moveBlocks = moves.map(move => {
             const mLeaders = [];
             filteredAthletes.forEach(w => {
-              const val = countMoveSuccesses(w.id, box.key, move, dir);
+              const val = countMoveSuccesses(w.id, box.key, move, dir, countMode);
               if (val > 0) mLeaders.push({ ...w, val });
             });
             return `
               <div style="margin-top:8px; padding-top:6px; border-top:1px solid var(--panelLine);">
                 <div style="font-size:10px; font-weight:800; color:var(--chalk); margin-bottom:4px;">${move}</div>
-                ${buildLeaderboardPodium(mLeaders)}
+                ${buildLeaderboardPodium(mLeaders, isOff ? 'var(--green)' : 'var(--red)')}
               </div>
             `;
           }).join("");
@@ -3672,7 +4127,7 @@
               <div style="font-size:11px; font-weight:800; color:var(--gold); text-transform:uppercase;">${box.label}</div>
               ${box.expandable ? `<span style="font-size:10px; color:var(--muted);">${expanded ? '▲ collapse' : '▼ expand'}</span>` : ''}
             </div>
-            ${buildLeaderboardPodium(leaders)}
+            ${buildLeaderboardPodium(leaders, isOff ? 'var(--green)' : 'var(--red)')}
             ${detailHtml}
           </div>
         `;
@@ -3711,9 +4166,9 @@
           <button class="btn" style="padding:6px 12px; font-size:11px; font-weight:800; background:${isOff ? 'var(--green)' : 'var(--mat)'}; color:var(--chalk); border:1px solid var(--panelLine);"
             onclick="leaderboardSide = 'offense'; leaderboardExpanded = null; render();">Offense</button>
           <button class="btn" style="padding:6px 12px; font-size:11px; font-weight:800; background:${!isOff ? 'var(--red)' : 'var(--mat)'}; color:var(--chalk); border:1px solid var(--panelLine);"
-            onclick="leaderboardSide = 'defense'; leaderboardExpanded = null; render();">Defense</button>
+            onclick="leaderboardSide = 'defense'; leaderboardExpanded = null; render();">Scored On</button>
           <span style="font-size:11px; color:var(--muted); align-self:center;">
-            ${isOff ? 'Leaders for scoring success · click a category to expand move leaders' : 'Leaders for successful defense · click a category to expand move leaders'}
+            ${isOff ? 'Leaders for scoring success · includes Shot % · click a category to expand' : 'Times opponent scored on your wrestler · click a category to expand move leaders'}
           </span>
         </div>
         <div class="grid-2">
@@ -4114,7 +4569,7 @@
           </div>
           ${weakPositions.length === 0 ? `<p style="color:var(--muted); font-size:12px; margin-bottom:12px;">All positions are in the green band (≥ 0.25). No proficiency remediation needed.</p>` : ''}
           ${weakPositions.map(p => `
-            <div style="background:var(--mat); padding:10px; border-radius:4px; margin-bottom:6px; border:1px solid ${p.band === 'red' ? 'var(--red)' : 'var(--gold)'};">
+            <div style="background:var(--mat); padding:10px; border-radius:4px; margin-bottom:6px; border:1px solid var(--panelLine);">
               <div style="display:flex; justify-content:space-between; font-weight:700; font-size:13px; margin-bottom:4px;">
                 <span>${p.name} Position
                   <span style="font-size:10px; font-weight:800; text-transform:uppercase; margin-left:6px; color:${p.color};">
@@ -4189,7 +4644,86 @@
             <span>Customize UI & Settings</span>
             ${helpIcon('admin_ui')}
           </div>
+
+          <!-- Season Archive / Load / Delete -->
+          <div style="margin-bottom:14px; background:var(--mat); border:1px solid var(--panelLine); border-radius:6px; padding:12px;">
+            <div style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase; margin-bottom:6px;">Season Archive & Storage</div>
+            <p style="font-size:11px; color:var(--muted); margin:0 0 10px 0;">
+              Archive seasons to a JSON file on your computer to free browser storage, then reload later.
+              Deleting a season removes matches/stats from this device but <strong>keeps Hall of Fame</strong> and saves the <strong>roster to the Roster Library</strong> for import when you create a new season.
+            </p>
+            <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;">
+              <button class="btn btn-gold" style="font-size:11px;" onclick="archiveActiveSeason()">Archive Active Season (Download)</button>
+              <button class="btn btn-green" style="font-size:11px;" onclick="triggerLoadSeasonArchive()">Load Season from File</button>
+            </div>
+            <div style="font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:4px;">Live Seasons</div>
+            ${store.seasons.map(s => `
+              <div class="item-row" style="padding:8px 0;">
+                <div>
+                  <strong>${s.name}</strong>
+                  ${s.id === store.activeSeasonId ? '<span style="color:var(--gold); font-size:10px; margin-left:6px;">[ACTIVE]</span>' : ''}
+                  <span style="color:var(--muted); font-size:11px; margin-left:6px;">
+                    ${s.roster.length} athletes · ${(s.matches || []).length} matches · ${(s.events || []).length} events
+                  </span>
+                </div>
+                <div style="display:flex; gap:4px;">
+                  ${s.id !== store.activeSeasonId ? `<button class="btn btn-gold" style="padding:4px 8px; font-size:10px;" onclick="store.activeSeasonId = '${s.id}'; store.activeBoutId = 'all'; store.activeWrestlerId = (store.seasons.find(x => x.id === '${s.id}').roster[0] || {}).id || null; persist(); render();">Activate</button>` : ''}
+                  <button class="btn" style="padding:4px 8px; font-size:10px; background:var(--panelLine); color:var(--chalk);" onclick="archiveSeason('${s.id}')">Archive</button>
+                  <button class="btn btn-red" style="padding:4px 8px; font-size:10px;" onclick="deleteSeason('${s.id}')">Delete</button>
+                </div>
+              </div>
+            `).join('')}
+            ${rosterLibrary.length ? `
+              <div style="font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; margin:12px 0 4px 0;">Roster Library (not visible as seasons)</div>
+              <p style="font-size:11px; color:var(--muted); margin:0 0 6px 0;">Import these when creating a new season via “Add / Load Season”.</p>
+              ${rosterLibrary.map(r => `
+                <div class="item-row" style="padding:6px 0;">
+                  <div style="font-size:12px;">
+                    <strong>${r.label}</strong>
+                    <span style="color:var(--muted); font-size:11px;"> · ${r.year || ""} · ${r.roster.length} athletes</span>
+                  </div>
+                  <button class="btn btn-red" style="padding:4px 8px; font-size:10px;" onclick="deleteRosterLibraryEntry('${r.id}')">Remove</button>
+                </div>
+              `).join('')}
+            ` : '<p style="font-size:11px; color:var(--muted); margin-top:8px;">No saved rosters in the library yet.</p>'}
+          </div>
           
+          <!-- AI Training Library -->
+          <div style="margin-bottom:14px; background:var(--mat); border:1px solid var(--panelLine); border-radius:6px; padding:12px;">
+            <div style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase; margin-bottom:6px;">AI Training Library</div>
+            <p style="font-size:11px; color:var(--muted); margin:0 0 10px 0;">
+              Ground-truth matches saved from Scout when <strong>Add to AI training library</strong> is checked on commit.
+              Examples include the full scoring log plus a YouTube link or a local video copy (IndexedDB).
+              The cloud model is not fine-tuned automatically — this library is used later as scoring examples.
+            </p>
+            <div style="font-size:12px; margin-bottom:8px;">
+              <strong>${aiTrainingLibrary.length}</strong> example(s) stored
+              ${aiTrainingLibrary.filter(e => e.video && e.video.type === 'youtube').length ? ` · ${aiTrainingLibrary.filter(e => e.video && e.video.type === 'youtube').length} YouTube` : ''}
+              ${aiTrainingLibrary.filter(e => e.video && e.video.type === 'file').length ? ` · ${aiTrainingLibrary.filter(e => e.video && e.video.type === 'file').length} local file` : ''}
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+              <button class="btn btn-gold" style="font-size:11px;" onclick="exportAiTrainingLibrary()" ${aiTrainingLibrary.length ? '' : 'disabled'}>Export Library JSON</button>
+              <button class="btn btn-red" style="font-size:11px;" onclick="clearAiTrainingLibrary()" ${aiTrainingLibrary.length ? '' : 'disabled'}>Clear Library</button>
+            </div>
+            ${aiTrainingLibrary.length ? `
+              <div style="max-height:180px; overflow-y:auto; font-size:11px;">
+                ${aiTrainingLibrary.slice().reverse().slice(0, 25).map(e => `
+                  <div class="item-row" style="padding:6px 0;">
+                    <div>
+                      <strong>${e.wrestlerName || 'Athlete'}</strong> vs ${e.opponent || 'Opp'}
+                      <span style="color:var(--muted);"> · ${e.date || ''} · ${e.level || ''}</span>
+                      <div style="color:var(--muted); font-size:10px;">
+                        ${(e.events || []).length} events
+                        · video: ${e.video && e.video.type === 'youtube' ? 'YouTube' : (e.video && e.video.type === 'file' ? ('file' + (e.video.hasLocalBlob ? ' ✓' : ' (meta only)')) : 'none')}
+                      </div>
+                    </div>
+                  </div>
+                `).join('')}
+                ${aiTrainingLibrary.length > 25 ? `<p style="color:var(--muted);">…and ${aiTrainingLibrary.length - 25} more</p>` : ''}
+              </div>
+            ` : '<p style="font-size:11px; color:var(--muted); margin:0;">No training examples yet. Score a match on Scout with the training checkbox enabled.</p>'}
+          </div>
+
           <!-- Screen Layout Section -->
           <div style="margin-bottom:14px;">
             <div style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">Screen Layout & Reordering</div>
@@ -5164,7 +5698,9 @@
                   <select class="select" style="width:auto; margin-bottom:0; font-size:11px;" onchange="expandedSheetLevel = this.value; render();">
                     <option value="Varsity" ${expandedSheetLevel === 'Varsity' ? 'selected' : ''}>Varsity</option>
                     <option value="JV" ${expandedSheetLevel === 'JV' ? 'selected' : ''}>JV</option>
+                    <option value="Exh" ${expandedSheetLevel === 'Exh' ? 'selected' : ''}>Exhibition</option>
                     <option value="Both" ${expandedSheetLevel === 'Both' ? 'selected' : ''}>Varsity &amp; JV</option>
+                    <option value="All" ${expandedSheetLevel === 'All' ? 'selected' : ''}>All Levels</option>
                   </select>
                   <select class="select" style="width:auto; margin-bottom:0; font-size:11px;" onchange="expandedSheetDivision = this.value; render();">
                     <option value="Boys" ${expandedSheetDivision === 'Boys' ? 'selected' : ''}>Boys</option>
