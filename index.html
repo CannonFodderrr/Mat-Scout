@@ -484,14 +484,24 @@
     let appConfig = {
       individualOffenseThreshold: 50,
       individualDefenseThreshold: 50,
+      individualShotPctThreshold: 40,
       teamOffenseThreshold: 50,
       teamDefenseThreshold: 50,
+      teamShotPctThreshold: 40,
       aiTrainOnCommit: false
     };
 
     let awards = [];
     let rosterLibrary = []; // saved rosters from archived/deleted seasons for later import
     let aiTrainingLibrary = []; // ground-truth matches for AI scoring examples
+
+    // Shared Manual + AI: how to recognize OUR wrestler on film
+    let ourWrestlerAppearance = {
+      ankleBand: "none", // none | red | green | blue
+      singletColor: "",
+      singletSecondary: "",
+      notes: ""
+    };
 
     let taxonomy = DEFAULT_TAXONOMY;
     let currentTab = "roster";
@@ -556,6 +566,10 @@
 
     let parsedEvents = null;
     let selectedEvents = {};
+    let aiVerifyFilter = "all";
+    let editingAiEventId = null;
+    let aiImportOpponent = "";
+    let videoPlaybackRate = 1;
 
     let uiUnlocked = false;
     let layoutOrder = {};
@@ -654,8 +668,10 @@
           appConfig = {
             individualOffenseThreshold: parsed.individualOffenseThreshold ?? parsed.individualPlanThreshold ?? 50,
             individualDefenseThreshold: parsed.individualDefenseThreshold ?? parsed.individualPlanThreshold ?? 50,
+            individualShotPctThreshold: parsed.individualShotPctThreshold ?? 40,
             teamOffenseThreshold: parsed.teamOffenseThreshold ?? parsed.teamPlanThreshold ?? 50,
             teamDefenseThreshold: parsed.teamDefenseThreshold ?? parsed.teamPlanThreshold ?? 50,
+            teamShotPctThreshold: parsed.teamShotPctThreshold ?? 40,
             aiTrainOnCommit: !!parsed.aiTrainOnCommit
           };
         }
@@ -994,12 +1010,16 @@
         if (vid) {
           vid.style.display = "block";
           if (vid.src !== videoBlobUrl) vid.src = videoBlobUrl || "";
+          try { vid.playbackRate = videoPlaybackRate || 1; } catch (e) {}
         }
         if (ytContainer) ytContainer.style.display = "none";
       } else if (videoSourceType === "youtube") {
         if (vid) vid.style.display = "none";
         if (ytContainer) ytContainer.style.display = "block";
         initOrUpdateYouTubePlayer(youtubeVideoId);
+        try {
+          if (ytPlayer && ytPlayer.setPlaybackRate) ytPlayer.setPlaybackRate(videoPlaybackRate || 1);
+        } catch (e) {}
       }
     }
 
@@ -1012,7 +1032,10 @@
           videoId: videoId,
           playerVars: { 'playsinline': 1, 'rel': 0 },
           events: {
-            'onReady': () => { ytLoadedVideoId = videoId; }
+            'onReady': (ev) => {
+              ytLoadedVideoId = videoId;
+              try { if (ev && ev.target && ev.target.setPlaybackRate) ev.target.setPlaybackRate(videoPlaybackRate || 1); } catch (e) {}
+            }
           }
         });
       } else if (ytPlayer && ytPlayer.loadVideoById && videoId !== ytLoadedVideoId) {
@@ -2002,10 +2025,38 @@
           <div id="yt-player-target"></div>
         </div>
 
-        <div style="font-size:11px; color:var(--muted);">Video pauses automatically when tagging moves. Click timestamps in the log to seek.</div>
+        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:8px; margin-bottom:4px;">
+          <span style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase;">Playback Speed</span>
+          <div id="playback-speed-btns" style="display:flex; flex-wrap:wrap; gap:4px;">
+            ${[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2].map(r => `
+              <button type="button" class="chip ${videoPlaybackRate === r ? 'selected' : ''}" style="min-width:44px; padding:4px 8px;"
+                onclick="setVideoPlaybackRate(${r})">${r === 1 ? '1×' : r + '×'}</button>
+            `).join('')}
+          </div>
+        </div>
+        <div style="font-size:11px; color:var(--muted);">Video pauses automatically when tagging moves. Click timestamps in the log to seek. Slow motion works in Manual and AI modes.</div>
       `;
       return videoCardEl;
     }
+
+    function setVideoPlaybackRate(rate) {
+      const r = Number(rate) || 1;
+      videoPlaybackRate = r;
+      const vid = document.getElementById("persistent-video");
+      if (vid) { try { vid.playbackRate = r; } catch (e) {} }
+      if (ytPlayer && typeof ytPlayer.setPlaybackRate === "function") {
+        try { ytPlayer.setPlaybackRate(r); } catch (e) {}
+      }
+      const speedWrap = document.getElementById("playback-speed-btns");
+      if (speedWrap) {
+        speedWrap.querySelectorAll("button").forEach(btn => {
+          const label = (btn.textContent || "").replace("×", "").trim();
+          const br = label === "1" ? 1 : parseFloat(label);
+          btn.classList.toggle("selected", Math.abs(r - br) < 0.001);
+        });
+      }
+    }
+
 
     function renderScout(target) {
       const season = getActiveSeason();
@@ -2088,6 +2139,73 @@
       return `(${parts.join(', ')})`;
     }
 
+    function snapshotOurWrestlerAppearance() {
+      return {
+        ankleBand: ourWrestlerAppearance.ankleBand || "none",
+        singletColor: (ourWrestlerAppearance.singletColor || "").trim(),
+        singletSecondary: (ourWrestlerAppearance.singletSecondary || "").trim(),
+        notes: (ourWrestlerAppearance.notes || "").trim()
+      };
+    }
+
+    function formatOurWrestlerAppearanceText(app, wrestlerName) {
+      const a = app || ourWrestlerAppearance || {};
+      const band = !a.ankleBand || a.ankleBand === "none"
+        ? "no visible ankle band"
+        : (a.ankleBand + " ankle band");
+      const parts = [];
+      if (a.singletColor) parts.push(a.singletColor);
+      if (a.singletSecondary) parts.push("trim/secondary: " + a.singletSecondary);
+      const singlet = parts.length ? parts.join("; ") : "singlet not specified";
+      const notes = a.notes ? (" Notes: " + a.notes + ".") : "";
+      const name = wrestlerName || "Our wrestler";
+      return `${name} — ankle: ${band}; singlet: ${singlet}.${notes}`;
+    }
+
+    function renderOurWrestlerIdCard(activeW, opts) {
+      opts = opts || {};
+      const compact = !!opts.compact;
+      const name = activeW ? activeW.name : "our wrestler";
+      return `
+        <div style="background:var(--mat); border:1px solid var(--panelLine); border-radius:6px; padding:${compact ? "10px" : "12px"}; margin-bottom:10px;">
+          <div style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase; margin-bottom:6px;">
+            Identify Your Wrestler
+          </div>
+          <p style="font-size:11px; color:var(--muted); margin:0 0 8px 0;">
+            How to recognize <strong style="color:var(--chalk);">${name}</strong> on film (ankle band and/or singlet). Used for AI analysis and saved with training-library examples.
+          </p>
+          <div class="grid-2">
+            <div>
+              <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Ankle Band</label>
+              <select class="select" onchange="ourWrestlerAppearance.ankleBand = this.value;">
+                <option value="none" ${ourWrestlerAppearance.ankleBand === "none" ? "selected" : ""}>None / not visible</option>
+                <option value="red" ${ourWrestlerAppearance.ankleBand === "red" ? "selected" : ""}>Red</option>
+                <option value="green" ${ourWrestlerAppearance.ankleBand === "green" ? "selected" : ""}>Green</option>
+                <option value="blue" ${ourWrestlerAppearance.ankleBand === "blue" ? "selected" : ""}>Blue</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Singlet Primary Color</label>
+              <input class="input" placeholder="e.g. navy, black" value="${(ourWrestlerAppearance.singletColor || "").replace(/"/g, "&quot;")}"
+                oninput="ourWrestlerAppearance.singletColor = this.value" />
+            </div>
+          </div>
+          <div class="grid-2">
+            <div>
+              <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Singlet Secondary / Trim</label>
+              <input class="input" placeholder="e.g. gold trim" value="${(ourWrestlerAppearance.singletSecondary || "").replace(/"/g, "&quot;")}"
+                oninput="ourWrestlerAppearance.singletSecondary = this.value" />
+            </div>
+            <div>
+              <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Extra Notes</label>
+              <input class="input" style="margin-bottom:0;" placeholder="e.g. left ankle" value="${(ourWrestlerAppearance.notes || "").replace(/"/g, "&quot;")}"
+                oninput="ourWrestlerAppearance.notes = this.value" />
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     function renderManualScoutContent(activeW, boutOpponents, autoOpponent) {
       if (!activeMatch) {
         const boutReady = store.activeBoutId && store.activeBoutId !== "all" && getActiveBout();
@@ -2124,6 +2242,7 @@
 
             <label style="font-size:11px; color:var(--muted);">Opponent Name</label>
             <input id="log-opponent" class="input" value="${autoOpponent}" placeholder="Enter opponent name" ${!boutReady ? 'disabled' : ''} />
+            ${renderOurWrestlerIdCard(activeW)}
             <button class="btn btn-gold" style="width:100%; margin-top:4px; ${!boutReady ? 'opacity:0.45; cursor:not-allowed;' : ''}" onclick="startMatch()" ${!boutReady ? 'disabled' : ''}>
               ${boutReady ? 'Start Scoring Match' : 'Select an Event to Start Scoring'}
             </button>
@@ -2204,6 +2323,10 @@
               <div style="font-size:28px; font-weight:800; font-family:monospace;">${oppPts}</div>
             </div>
           </div>
+        </div>
+
+        <div class="card" style="padding:10px 12px;">
+          ${renderOurWrestlerIdCard(activeW, { compact: true })}
         </div>
 
         <!-- Period Bar Card -->
@@ -2369,11 +2492,13 @@
     }
 
     function renderAIScoutContent(activeW, boutOpponents, autoOpponent) {
-      return `
-        ${!parsedEvents ? `
+      const withVid = (aiTrainingLibrary || []).filter(e => e && e.video && e.video.type === "file" && e.video.hasLocalBlob).length;
+      const totalTrain = (aiTrainingLibrary || []).length;
+
+      if (!parsedEvents) {
+        return `
           <div class="card">
             <div class="card-title">AI Video Scout: ${activeW.name} (${activeW.weightClass} lbs)</div>
-            
             <div class="grid-2">
               <div>
                 <label style="font-size:11px; color:var(--muted);">Match Level</label>
@@ -2391,40 +2516,339 @@
                 </select>
               </div>
             </div>
-
             <label style="font-size:11px; color:var(--muted);">Opponent Name</label>
             <input id="imp-opp" class="input" value="${autoOpponent}" placeholder="Opponent name" />
-
+            ${renderOurWrestlerIdCard(activeW)}
+            <div style="background:var(--mat); border:1px solid var(--panelLine); border-radius:4px; padding:10px; margin-bottom:10px; font-size:11px;">
+              <div style="font-weight:800; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">AI Training Library</div>
+              ${totalTrain === 0
+                ? `<p style="margin:0; color:var(--muted);">No examples yet. Score in Manual with video + training checkbox for better visual recognition.</p>`
+                : `<p style="margin:0; color:var(--chalk);"><strong>${totalTrain}</strong> example(s) · <strong style="color:${withVid ? 'var(--green)' : 'var(--muted)'};">${withVid}</strong> with local video</p>`}
+            </div>
             <label style="font-size:11px; color:var(--muted);">Gemini API Key</label>
             <input type="password" id="imp-key" class="input" placeholder="AIzaSy..." value="${localStorage.getItem(API_KEY_STORAGE) || ''}" />
-
             <div id="ai-status" style="display:none; padding:10px; margin-bottom:8px; border-radius:4px; font-size:12px; font-weight:700; text-align:center; background:var(--goldDim); color:var(--gold);"></div>
-
             <button id="ai-btn" class="btn btn-gold" style="width:100%;" onclick="runDirectBrowserAnalysis()">Analyze Match with AI</button>
-            <div style="font-size:10px; color:var(--muted); margin-top:6px;">*Note: In-browser AI video extraction requires a local file (.mp4) due to browser CORS policies.</div>
+            <div style="font-size:10px; color:var(--muted); margin-top:6px;">Requires local .mp4. Uses taxonomy, modifiers, visual ID, and training examples. Low-confidence stays unchecked for review.</div>
           </div>
-        ` : `
-          <div class="card">
-            <div class="card-title">
-              <span>Verify Events for ${activeW.name} (${Object.values(selectedEvents).filter(Boolean).length} Selected)</span>
-              <button class="btn-back" onclick="cancelImport()">Cancel</button>
+        `;
+      }
+
+      const oppName = aiImportOpponent || "Opponent";
+      const scoringEvs = parsedEvents.filter(e => selectedEvents[e.id]);
+      let ourPts = 0, oppPts = 0;
+      scoringEvs.forEach(e => {
+        const pts = e.points || 0;
+        if (isPenaltyCategory(e.category)) {
+          if (e.direction === "offense") oppPts += pts; else ourPts += pts;
+        } else {
+          if (e.direction === "offense") ourPts += pts;
+          else if (e.outcome === "fail") oppPts += pts;
+        }
+      });
+      const selectedCount = scoringEvs.length;
+      const lowCount = parsedEvents.filter(e => (e.confidence || "").toLowerCase() === "low").length;
+      const confBadge = (c) => {
+        const conf = (c || "medium").toLowerCase();
+        if (conf === "low") return `<span style="font-size:9px; font-weight:800; padding:2px 6px; border-radius:3px; background:var(--goldDim); color:var(--gold); border:1px solid var(--gold);">LOW</span>`;
+        if (conf === "high") return `<span style="font-size:9px; font-weight:800; padding:2px 6px; border-radius:3px; background:var(--greenDim); color:var(--green); border:1px solid var(--green);">HIGH</span>`;
+        return `<span style="font-size:9px; font-weight:800; padding:2px 6px; border-radius:3px; background:var(--panelLine); color:var(--muted);">MED</span>`;
+      };
+      const filtered = parsedEvents.filter(ev => {
+        const conf = (ev.confidence || "medium").toLowerCase();
+        if (aiVerifyFilter === "low") return conf === "low";
+        if (aiVerifyFilter === "medium") return conf === "medium";
+        if (aiVerifyFilter === "choices") return ev.category === "Choice";
+        if (aiVerifyFilter === "moves") return ev.category !== "Choice" && ev.category !== "Flow";
+        return true;
+      });
+
+      return `
+        <div class="card" style="padding:12px;">
+          <div class="grid-2">
+            <div style="background-color:var(--greenDim); border:1px solid var(--green); padding:8px 12px; text-align:center; border-radius:6px;">
+              <div style="font-size:10px; font-weight:700; color:var(--green); text-transform:uppercase;">${activeW.name} (${selectedMatchLevel})</div>
+              <div style="font-size:28px; font-weight:800; font-family:monospace;">${ourPts}</div>
             </div>
-            <button class="btn btn-gold" style="width:100%; font-size:11px; margin-bottom:8px;" onclick="swapAllDir()">Swap All OFF/DEF</button>
-            <div style="max-height:240px; overflow-y:auto; margin-bottom:12px;">
-              ${parsedEvents.map((ev, idx) => `
-                <div class="item-row">
-                  <input type="checkbox" ${selectedEvents[ev.id] ? 'checked' : ''} onchange="toggleSelect('${ev.id}')" />
-                  <span style="font-family:monospace; color:var(--gold); cursor:pointer; text-decoration:underline;" onclick="seekVideo('${ev.timestamp}')">${ev.timestamp || '--:--'}</span>
-                  <span style="font-weight:700; color:${ev.direction === 'offense' ? 'var(--green)' : 'var(--red)'}; cursor:pointer;" onclick="toggleEvDir(${idx})">${ev.direction === 'offense' ? 'OFF' : 'DEF'}</span>
-                  <span style="flex:1; margin-left:8px;">${ev.move} ${ev.raw_move && ev.raw_move !== ev.move ? `(${ev.raw_move})` : ''}</span>
-                  <span style="color:${ev.outcome === 'success' ? 'var(--green)' : 'var(--red)'}; cursor:pointer;" onclick="toggleEvOutcome(${idx})">${ev.outcome}</span>
-                </div>
-              `).join('')}
+            <div style="background-color:var(--redDim); border:1px solid var(--red); padding:8px 12px; text-align:center; border-radius:6px;">
+              <div style="font-size:10px; font-weight:700; color:var(--red); text-transform:uppercase;">${oppName}</div>
+              <div style="font-size:28px; font-weight:800; font-family:monospace;">${oppPts}</div>
             </div>
-            <button class="btn btn-green" style="width:100%;" onclick="commitImport()">Commit Events to ${activeW.name}'s Stats</button>
           </div>
-        `}
+          <div style="font-size:10px; color:var(--muted); text-align:center; margin-top:6px;">Live score from <strong style="color:var(--chalk);">${selectedCount}</strong> selected · Manual scoring rules</div>
+        </div>
+        <div class="card">
+          <div class="card-title">
+            <span>Review AI Events (${selectedCount}/${parsedEvents.length})${lowCount ? ` · ${lowCount} low` : ""}</span>
+            <button class="btn-back" onclick="cancelImport()">Cancel</button>
+          </div>
+          <p style="font-size:11px; color:var(--muted); margin-bottom:8px;">Manual-format events. <strong style="color:var(--gold);">LOW</strong> unchecked by default. ✎ edits any field.</p>
+          <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;">
+            ${[["all","All"],["low","Low"],["medium","Med"],["choices","Choices"],["moves","Moves"]].map(([k,lab]) =>
+              `<button class="chip ${aiVerifyFilter===k?'selected':''}" style="min-width:auto;" onclick="aiVerifyFilter='${k}'; render();">${lab}</button>`
+            ).join("")}
+            <button class="btn btn-gold" style="font-size:10px; padding:4px 10px;" onclick="swapAllDir()">Swap All OFF/DEF</button>
+            <button class="btn" style="background:var(--panelLine); color:var(--chalk); font-size:10px; padding:4px 10px;" onclick="selectAllAiEvents(true)">Select Visible</button>
+            <button class="btn" style="background:var(--panelLine); color:var(--chalk); font-size:10px; padding:4px 10px;" onclick="selectAllAiEvents(false)">Deselect Visible</button>
+          </div>
+          <div style="max-height:440px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; margin-bottom:12px;">
+            ${filtered.length === 0 ? `<p style="color:var(--muted); font-size:12px;">No events match filter.</p>` : ""}
+            ${filtered.map(ev => {
+              const idx = parsedEvents.findIndex(e => e.id === ev.id);
+              const isLow = (ev.confidence || "").toLowerCase() === "low";
+              const isChoice = ev.category === "Choice";
+              const editing = editingAiEventId === ev.id;
+              const ptsLabel = (ev.points != null && ev.points !== 0) ? `+${ev.points}` : (isChoice ? "" : "0");
+              return `
+                <div style="background:var(--mat); border:1px solid ${isLow ? 'var(--gold)' : 'var(--panelLine)'}; border-radius:6px; padding:8px 10px;">
+                  <div style="display:flex; align-items:flex-start; gap:8px; flex-wrap:wrap;">
+                    <input type="checkbox" style="margin-top:4px;" ${selectedEvents[ev.id] ? 'checked' : ''} onchange="toggleSelect('${ev.id}')" />
+                    <div style="flex:1; min-width:200px;">
+                      <div style="display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-bottom:4px;">
+                        <span style="font-family:monospace; color:var(--gold); cursor:pointer; text-decoration:underline; font-weight:700;" onclick="seekVideo('${escAttr(ev.timestamp || '')}')">${ev.timestamp || '--:--'}</span>
+                        <span style="font-size:10px; color:var(--muted); font-weight:700;">[${ev.period || 'P1'}]</span>
+                        ${confBadge(ev.confidence)}
+                        ${isChoice ? `<span style="font-size:9px; font-weight:800; color:var(--gold);">CHOICE</span>` : ""}
+                        <span style="font-weight:700; color:${ev.direction === 'offense' ? 'var(--green)' : 'var(--red)'}; cursor:pointer;" onclick="toggleEvDir(${idx})">${ev.direction === 'offense' ? 'OFF' : 'DEF'}</span>
+                        ${!isChoice ? `<span style="color:${ev.outcome === 'success' ? 'var(--green)' : 'var(--red)'}; cursor:pointer; font-weight:700;" onclick="toggleEvOutcome(${idx})">${ev.outcome}</span>` : ""}
+                        ${ptsLabel ? `<span style="color:var(--gold); font-family:monospace; font-weight:700;">${ptsLabel}</span>` : ""}
+                      </div>
+                      <div style="font-size:12px;"><strong>${ev.category || ""}</strong>${ev.subCategory ? ` · ${ev.subCategory}` : ""} — <strong>${ev.move || ""}</strong></div>
+                      ${ev.tie ? `<div style="font-size:10px; color:var(--gold); margin-top:2px;">[${ev.tie}]</div>` : ""}
+                    </div>
+                    <button class="btn" style="background:var(--panelLine); color:var(--chalk); font-size:10px; padding:4px 8px;" onclick="toggleAiEventEditor('${ev.id}')">${editing ? 'Close' : '✎ Edit'}</button>
+                    <button class="btn btn-red" style="font-size:10px; padding:4px 8px;" onclick="deleteAiParsedEvent('${ev.id}')">✕</button>
+                  </div>
+                  ${editing ? renderAiEventEditor(ev, idx) : ""}
+                </div>`;
+            }).join("")}
+          </div>
+          <button class="btn btn-green" style="width:100%;" onclick="commitImport()" ${selectedCount ? "" : "disabled"}>
+            Commit ${selectedCount} Selected Event${selectedCount === 1 ? "" : "s"} to ${activeW.name}'s Stats
+          </button>
+        </div>
       `;
+    }
+
+    function renderAiEventEditor(ev, idx) {
+      const isChoice = ev.category === "Choice";
+      const cats = Object.keys(taxonomy.MOVE_GROUPS || {});
+      const ties = taxonomy.TIE_MODIFIERS || [];
+      const finishes = taxonomy.FINISH_MODIFIERS || DEFAULT_TAXONOMY.FINISH_MODIFIERS || [];
+      const rides = taxonomy.RIDE_MODIFIERS || DEFAULT_TAXONOMY.RIDE_MODIFIERS || [];
+      let moveOptions = [];
+      if (!isChoice) {
+        const group = taxonomy.MOVE_GROUPS[ev.category];
+        if (Array.isArray(group)) moveOptions = group.slice();
+        else if (group && typeof group === "object") {
+          Object.keys(group).forEach(sub => (group[sub] || []).forEach(m => moveOptions.push(m)));
+        }
+        if (ev.move && !moveOptions.includes(ev.move)) moveOptions.unshift(ev.move);
+      }
+      return `
+        <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--panelLine); display:flex; flex-direction:column; gap:8px;">
+          <div class="grid-3">
+            <div>
+              <label style="font-size:9px; color:var(--muted); text-transform:uppercase; font-weight:700;">Timestamp</label>
+              <input class="input" style="margin-bottom:0;" value="${escAttr(ev.timestamp || '')}" onchange="updateAiParsedField(${idx}, 'timestamp', this.value)" />
+            </div>
+            <div>
+              <label style="font-size:9px; color:var(--muted); text-transform:uppercase; font-weight:700;">Period</label>
+              <select class="select" style="margin-bottom:0;" onchange="updateAiParsedField(${idx}, 'period', this.value)">
+                ${["P1","P2","P3","OT"].map(p => `<option value="${p}" ${ev.period===p?'selected':''}>${p}</option>`).join("")}
+              </select>
+            </div>
+            <div>
+              <label style="font-size:9px; color:var(--muted); text-transform:uppercase; font-weight:700;">Confidence</label>
+              <select class="select" style="margin-bottom:0;" onchange="updateAiParsedField(${idx}, 'confidence', this.value)">
+                <option value="high" ${(ev.confidence||'').toLowerCase()==='high'?'selected':''}>high</option>
+                <option value="medium" ${(ev.confidence||'medium').toLowerCase()==='medium'?'selected':''}>medium</option>
+                <option value="low" ${(ev.confidence||'').toLowerCase()==='low'?'selected':''}>low</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid-3">
+            <div>
+              <label style="font-size:9px; color:var(--muted); text-transform:uppercase; font-weight:700;">Direction</label>
+              <select class="select" style="margin-bottom:0;" onchange="updateAiParsedField(${idx}, 'direction', this.value); recalcAiEventPoints(${idx});">
+                <option value="offense" ${ev.direction==='offense'?'selected':''}>Offense (us)</option>
+                <option value="defense" ${ev.direction==='defense'?'selected':''}>Defense (faced)</option>
+              </select>
+            </div>
+            ${isChoice ? `
+              <div>
+                <label style="font-size:9px; color:var(--muted); text-transform:uppercase; font-weight:700;">Chooser</label>
+                <select class="select" style="margin-bottom:0;" onchange="updateAiChoiceChooser(${idx}, this.value)">
+                  <option value="Home" ${(ev.move||'').includes('Home')?'selected':''}>Home</option>
+                  <option value="Opponent" ${(ev.move||'').includes('Opponent')?'selected':''}>Opponent</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:9px; color:var(--muted); text-transform:uppercase; font-weight:700;">Position</label>
+                <select class="select" style="margin-bottom:0;" onchange="updateAiChoicePosition(${idx}, this.value)">
+                  ${["Top","Bottom","Neutral","Defer"].map(p => `<option value="${p}" ${(ev.detail||ev.move||'').includes(p)?'selected':''}>${p}</option>`).join("")}
+                </select>
+              </div>
+            ` : `
+              <div>
+                <label style="font-size:9px; color:var(--muted); text-transform:uppercase; font-weight:700;">Outcome</label>
+                <select class="select" style="margin-bottom:0;" onchange="updateAiParsedField(${idx}, 'outcome', this.value); recalcAiEventPoints(${idx});">
+                  <option value="success" ${ev.outcome==='success'?'selected':''}>success</option>
+                  <option value="fail" ${ev.outcome==='fail'?'selected':''}>fail</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:9px; color:var(--muted); text-transform:uppercase; font-weight:700;">Points</label>
+                <input type="number" class="input" style="margin-bottom:0;" value="${ev.points || 0}" onchange="updateAiParsedField(${idx}, 'points', Number(this.value)||0)" />
+              </div>
+            `}
+          </div>
+          ${!isChoice ? `
+            <div class="grid-2">
+              <div>
+                <label style="font-size:9px; color:var(--muted); text-transform:uppercase; font-weight:700;">Category</label>
+                <select class="select" style="margin-bottom:0;" onchange="updateAiParsedCategory(${idx}, this.value)">
+                  ${cats.map(c => `<option value="${escAttr(c)}" ${ev.category===c?'selected':''}>${c}</option>`).join("")}
+                  <option value="Choice" ${ev.category==='Choice'?'selected':''}>Choice</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:9px; color:var(--muted); text-transform:uppercase; font-weight:700;">Move</label>
+                <select class="select" style="margin-bottom:0;" onchange="updateAiParsedField(${idx}, 'move', this.value); recalcAiEventPoints(${idx});">
+                  ${moveOptions.map(m => `<option value="${escAttr(m)}" ${ev.move===m?'selected':''}>${m}</option>`).join("")}
+                </select>
+              </div>
+            </div>
+            <div class="grid-3">
+              <div>
+                <label style="font-size:9px; color:var(--muted); text-transform:uppercase; font-weight:700;">Tie / Setup</label>
+                <select class="select" style="margin-bottom:0;" onchange="setAiModifier(${idx}, 'tie', this.value)">
+                  <option value="">— none —</option>
+                  ${ties.map(t => `<option value="${escAttr(t)}" ${(ev.tie||'').split(' + ').includes(t)?'selected':''}>${t}</option>`).join("")}
+                </select>
+              </div>
+              <div>
+                <label style="font-size:9px; color:var(--muted); text-transform:uppercase; font-weight:700;">Finish</label>
+                <select class="select" style="margin-bottom:0;" onchange="setAiModifier(${idx}, 'finish', this.value)">
+                  <option value="">— none —</option>
+                  ${finishes.map(t => `<option value="${escAttr(t)}" ${(ev.tie||'').split(' + ').includes(t)?'selected':''}>${t}</option>`).join("")}
+                </select>
+              </div>
+              <div>
+                <label style="font-size:9px; color:var(--muted); text-transform:uppercase; font-weight:700;">Ride</label>
+                <select class="select" style="margin-bottom:0;" onchange="setAiModifier(${idx}, 'ride', this.value)">
+                  <option value="">— none —</option>
+                  ${rides.map(t => `<option value="${escAttr(t)}" ${(ev.tie||'').split(' + ').includes(t)?'selected':''}>${t}</option>`).join("")}
+                </select>
+              </div>
+            </div>
+          ` : ""}
+        </div>
+      `;
+    }
+
+    function toggleAiEventEditor(id) {
+      editingAiEventId = editingAiEventId === id ? null : id;
+      render();
+    }
+    function updateAiParsedField(idx, field, value) {
+      if (!parsedEvents || !parsedEvents[idx]) return;
+      parsedEvents[idx][field] = value;
+      if (field === "confidence" && String(value).toLowerCase() === "low") selectedEvents[parsedEvents[idx].id] = false;
+      render();
+    }
+    function recalcAiEventPoints(idx) {
+      if (!parsedEvents || !parsedEvents[idx]) return;
+      const e = parsedEvents[idx];
+      if (e.category === "Choice" || e.category === "Flow") e.points = 0;
+      else if (isPenaltyCategory(e.category)) e.points = e.points || 1;
+      else if (e.category === "Near Fall / Pin") {
+        const src = (e.move || "") + " " + (e.detail || "");
+        if (/pin/i.test(src)) e.points = 0;
+        else if (/4/.test(src)) e.points = 4;
+        else if (/3/.test(src)) e.points = 3;
+        else if (/2/.test(src)) e.points = 2;
+        else e.points = 0;
+        if (e.outcome === "fail" && e.direction === "offense") e.points = 0;
+      } else if (e.outcome === "success") e.points = getPointValue(e.category, e.move);
+      else if (e.outcome === "fail" && e.direction === "defense") e.points = getPointValue(e.category, e.move);
+      else e.points = 0;
+      render();
+    }
+    function updateAiParsedCategory(idx, cat) {
+      if (!parsedEvents || !parsedEvents[idx]) return;
+      parsedEvents[idx].category = cat;
+      if (cat === "Choice") {
+        parsedEvents[idx].move = "Home Choice: Neutral";
+        parsedEvents[idx].detail = "Neutral";
+        parsedEvents[idx].outcome = "success";
+        parsedEvents[idx].tie = "";
+        parsedEvents[idx].points = 0;
+        render();
+        return;
+      }
+      const group = taxonomy.MOVE_GROUPS[cat];
+      let first = "";
+      if (Array.isArray(group) && group[0]) first = group[0];
+      else if (group && typeof group === "object") {
+        const sub = Object.keys(group)[0];
+        first = (group[sub] && group[sub][0]) || "";
+      }
+      parsedEvents[idx].move = first;
+      parsedEvents[idx].detail = "";
+      recalcAiEventPoints(idx);
+    }
+    function updateAiChoiceChooser(idx, chooser) {
+      if (!parsedEvents || !parsedEvents[idx]) return;
+      const pos = parsedEvents[idx].detail || "Neutral";
+      parsedEvents[idx].category = "Choice";
+      parsedEvents[idx].move = `${chooser} Choice: ${pos}`;
+      parsedEvents[idx].detail = pos;
+      parsedEvents[idx].direction = chooser === "Home" ? "offense" : "defense";
+      parsedEvents[idx].outcome = "success";
+      parsedEvents[idx].points = 0;
+      render();
+    }
+    function updateAiChoicePosition(idx, pos) {
+      if (!parsedEvents || !parsedEvents[idx]) return;
+      const chooser = (parsedEvents[idx].move || "").includes("Opponent") ? "Opponent" : "Home";
+      parsedEvents[idx].category = "Choice";
+      parsedEvents[idx].move = `${chooser} Choice: ${pos}`;
+      parsedEvents[idx].detail = pos;
+      parsedEvents[idx].outcome = "success";
+      parsedEvents[idx].points = 0;
+      render();
+    }
+    function setAiModifier(idx, kind, value) {
+      if (!parsedEvents || !parsedEvents[idx]) return;
+      const finishes = taxonomy.FINISH_MODIFIERS || DEFAULT_TAXONOMY.FINISH_MODIFIERS || [];
+      const rides = taxonomy.RIDE_MODIFIERS || DEFAULT_TAXONOMY.RIDE_MODIFIERS || [];
+      const ties = taxonomy.TIE_MODIFIERS || [];
+      let parts = (parsedEvents[idx].tie || "").split(" + ").filter(Boolean);
+      const stripSet = new Set(kind === "tie" ? ties : kind === "finish" ? finishes : rides);
+      parts = parts.filter(p => !stripSet.has(p));
+      if (value) parts.push(value);
+      parsedEvents[idx].tie = parts.join(" + ");
+      render();
+    }
+    function deleteAiParsedEvent(id) {
+      if (!parsedEvents) return;
+      parsedEvents = parsedEvents.filter(e => e.id !== id);
+      delete selectedEvents[id];
+      if (editingAiEventId === id) editingAiEventId = null;
+      render();
+    }
+    function selectAllAiEvents(on) {
+      if (!parsedEvents) return;
+      parsedEvents.forEach(ev => {
+        const conf = (ev.confidence || "").toLowerCase();
+        if (aiVerifyFilter === "low" && conf !== "low") return;
+        if (aiVerifyFilter === "medium" && conf !== "medium") return;
+        if (aiVerifyFilter === "choices" && ev.category !== "Choice") return;
+        if (aiVerifyFilter === "moves" && (ev.category === "Choice" || ev.category === "Flow")) return;
+        selectedEvents[ev.id] = !!on;
+      });
+      render();
     }
 
     function isNestedMoveCategory(cat) {
@@ -2677,6 +3101,7 @@
         events: []
       };
       currentPeriod = "P1";
+      activeMatch.ourAppearance = snapshotOurWrestlerAppearance();
       render();
     }
 
@@ -2886,6 +3311,10 @@
         };
       }
 
+      const appearance = activeMatch.ourAppearance
+        ? JSON.parse(JSON.stringify(activeMatch.ourAppearance))
+        : snapshotOurWrestlerAppearance();
+
       return {
         id: Math.random().toString(36).slice(2, 10),
         savedAt: new Date().toISOString(),
@@ -2901,6 +3330,9 @@
         level: activeMatch.level,
         date: activeMatch.date,
         source: "manual",
+        // Visual ID of OUR wrestler on film (ankle band / singlet)
+        ourAppearance: appearance,
+        ourAppearanceText: formatOurWrestlerAppearanceText(appearance, w ? w.name : ""),
         events,
         result: {
           ourP: result.ourP,
@@ -2913,6 +3345,9 @@
     }
 
     async function saveActiveMatchToAiTrainingLibrary() {
+      if (activeMatch) {
+        activeMatch.ourAppearance = snapshotOurWrestlerAppearance();
+      }
       const example = buildTrainingExampleFromActiveMatch();
       if (!example) return { ok: false, reason: "no match" };
 
@@ -2970,6 +3405,131 @@
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+    }
+
+    function downloadTextFile(filename, text, mime) {
+      const blob = new Blob([text], { type: mime || "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function csvEscape(v) {
+      const s = v == null ? "" : String(v);
+      if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }
+
+    function exportAiTrainingLibraryForKaggle() {
+      if (!aiTrainingLibrary.length) return alert("AI Training Library is empty.");
+      const exportedAt = new Date().toISOString();
+      const move_classes = [];
+      Object.keys(taxonomy.MOVE_GROUPS || {}).forEach(cat => {
+        const val = taxonomy.MOVE_GROUPS[cat];
+        if (Array.isArray(val)) val.forEach(m => move_classes.push({ category: cat, move: m }));
+        else if (val && typeof val === "object") Object.keys(val).forEach(sub => (val[sub]||[]).forEach(m => move_classes.push({ category: cat, sub_category: sub, move: m })));
+      });
+      const matches = [];
+      const eventRows = [];
+      aiTrainingLibrary.forEach((ex, matchIndex) => {
+        const match_id = ex.id || ("match_" + matchIndex);
+        const video = ex.video || { type: "none" };
+        const video_file_name = video.type === "file" ? (video.fileName || match_id + ".mp4") : (video.type === "youtube" ? ("youtube_" + (video.youtubeId || match_id) + ".mp4") : "");
+        const youtube_id = video.type === "youtube" ? (video.youtubeId || "") : "";
+        const youtube_url = video.type === "youtube" ? (video.youtubeUrl || (youtube_id ? "https://www.youtube.com/watch?v=" + youtube_id : "")) : "";
+        const events = Array.isArray(ex.events) ? ex.events : [];
+        const result = ex.result || {};
+        const app = ex.ourAppearance || {};
+        matches.push({
+          match_id, match_index: matchIndex, saved_at: ex.savedAt || "", season_name: ex.seasonName || "",
+          wrestler_name: ex.wrestlerName || "", weight_class: ex.weightClass || "", division: ex.division || "",
+          opponent: ex.opponent || "", level: ex.level || "", date: ex.date || "", source: ex.source || "manual",
+          pov: "our_wrestler",
+          ankle_band: app.ankleBand || "", singlet_color: app.singletColor || "", singlet_secondary: app.singletSecondary || "",
+          appearance_notes: app.notes || "", our_appearance_text: ex.ourAppearanceText || "",
+          result_our_points: result.ourP != null ? result.ourP : "", result_opp_points: result.oppP != null ? result.oppP : "",
+          result_outcome: result.outcome || "", result_method: result.method || "", event_count: events.length,
+          video_type: video.type || "none", video_file_name, video_has_local_blob: !!video.hasLocalBlob, youtube_id, youtube_url
+        });
+        events.forEach((e, eventIndex) => {
+          const ts = e.timestamp || "";
+          const parts = String(ts).split(":").map(Number);
+          const tSec = (parts.length === 2 && parts.every(n => !isNaN(n))) ? parts[0]*60+parts[1] : "";
+          eventRows.push({
+            match_id, event_index: eventIndex, event_id: e.id || (match_id + "_e" + eventIndex),
+            timestamp: ts, time_sec: tSec,
+            window_start_sec: tSec === "" ? "" : Math.max(0, tSec - 1.5),
+            window_end_sec: tSec === "" ? "" : tSec + 1.5,
+            period: e.period || "", category: e.category || "", sub_category: e.subCategory || "",
+            move: e.move || "", direction: e.direction || "", outcome: e.outcome || "",
+            points: e.points != null ? e.points : "", detail: e.detail || "", tie: e.tie || "",
+            label_primary: (e.category === "Choice") ? ("CHOICE:" + (e.detail || e.move || "")) : ((e.category||"") + ":" + (e.move||"")),
+            label_with_outcome: (e.category === "Choice") ? ("CHOICE:" + (e.detail || e.move || "")) : ((e.category||"") + ":" + (e.move||"") + ":" + (e.outcome||"")),
+            actor: e.direction === "defense" ? "opponent" : "our_wrestler",
+            wrestler_name: ex.wrestlerName || "", opponent_name: ex.opponent || "",
+            ankle_band: app.ankleBand || "", singlet_color: app.singletColor || "",
+            video_file_name, youtube_id, youtube_url, confidence: e.confidence || "", source: e.source || ex.source || "manual"
+          });
+        });
+      });
+      const dataset = {
+        type: "mat-scout-kaggle-wrestling-dataset", version: 1, exported_at: exportedAt,
+        task: "wrestling_match_event_recognition",
+        description: "Coach-verified folkstyle events from Mat Scout. POV = our wrestler. Includes appearance (ankle band/singlet).",
+        taxonomy: { move_classes, ties: taxonomy.TIE_MODIFIERS||[], finishes: taxonomy.FINISH_MODIFIERS||[], rides: taxonomy.RIDE_MODIFIERS||[] },
+        stats: { match_count: matches.length, event_count: eventRows.length },
+        matches, events: eventRows
+      };
+      const eventCols = ["match_id","event_index","event_id","timestamp","time_sec","window_start_sec","window_end_sec","period","category","sub_category","move","direction","outcome","points","detail","tie","label_primary","label_with_outcome","actor","wrestler_name","opponent_name","ankle_band","singlet_color","video_file_name","youtube_id","youtube_url","confidence","source"];
+      const eventsCsv = [eventCols.join(",")].concat(eventRows.map(r => eventCols.map(c => csvEscape(r[c])).join(","))).join("\n");
+      const matchCols = ["match_id","match_index","saved_at","season_name","wrestler_name","weight_class","division","opponent","level","date","source","pov","ankle_band","singlet_color","singlet_secondary","appearance_notes","our_appearance_text","result_our_points","result_opp_points","result_outcome","result_method","event_count","video_type","video_file_name","video_has_local_blob","youtube_id","youtube_url"];
+      const matchesCsv = [matchCols.join(",")].concat(matches.map(r => matchCols.map(c => csvEscape(r[c])).join(","))).join("\n");
+      const readme = `Mat Scout Kaggle Dataset\nExported: ${exportedAt}\nMatches: ${matches.length}\nEvents: ${eventRows.length}\n\nPOV: our_wrestler (offense = us, defense = faced).\nAppearance columns: ankle_band, singlet_color.\nVideos: place files in videos/ named video_file_name, or use youtube_id.\nPrimary table: mat-scout-kaggle-events.csv\n`;
+      downloadTextFile("mat-scout-kaggle-dataset.json", JSON.stringify(dataset, null, 2), "application/json");
+      setTimeout(() => downloadTextFile("mat-scout-kaggle-events.csv", eventsCsv, "text/csv"), 400);
+      setTimeout(() => downloadTextFile("mat-scout-kaggle-matches.csv", matchesCsv, "text/csv"), 800);
+      setTimeout(() => downloadTextFile("mat-scout-kaggle-README.txt", readme, "text/plain"), 1200);
+      alert("Kaggle export started (" + matches.length + " matches, " + eventRows.length + " events). Upload videos separately.");
+    }
+
+    function importAiTrainingLibraryFromFile(file) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          let examples = Array.isArray(data) ? data : (Array.isArray(data.examples) ? data.examples : null);
+          if (!examples) throw new Error("Expected Mat Scout library export with examples array.");
+          let added = 0;
+          examples.forEach(ex => {
+            if (!ex || typeof ex !== "object") return;
+            const copy = JSON.parse(JSON.stringify(ex));
+            copy.id = Math.random().toString(36).slice(2, 10);
+            if (copy.video && copy.video.type === "file") {
+              copy.video.hasLocalBlob = false;
+              copy.video.note = (copy.video.note || "") + " Imported without local video blob.";
+            }
+            if (!copy.savedAt) copy.savedAt = new Date().toISOString();
+            aiTrainingLibrary.push(copy);
+            added++;
+          });
+          persist();
+          render();
+          alert("Imported " + added + " example(s). Library size: " + aiTrainingLibrary.length);
+        } catch (err) {
+          alert("Import failed: " + (err.message || err));
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function triggerImportAiTrainingLibrary() {
+      const input = document.createElement("input");
+      input.type = "file"; input.accept = "application/json,.json";
+      input.onchange = () => { if (input.files && input.files[0]) importAiTrainingLibraryFromFile(input.files[0]); };
+      input.click();
     }
 
     async function clearAiTrainingLibrary() {
@@ -4521,6 +5081,18 @@
       const weakOffense = offense.filter(r => r.attempts >= minAttempts && r.rate < offenseThreshold);
       const weakDefense = defense.filter(r => r.attempts >= minAttempts && r.rate < defenseThreshold);
 
+      const shotPctThreshold = statsShowTeam
+        ? (appConfig.teamShotPctThreshold ?? 40)
+        : (appConfig.individualShotPctThreshold ?? 40);
+      const shotPct = statsShowTeam
+        ? computeShotPercentage(null)
+        : computeShotPercentage(activeW.id);
+      const shotMoves = new Set(getShotMoveList());
+      const weakShots = offense.filter(r =>
+        shotMoves.has(r.move) && r.attempts >= minAttempts && r.rate < shotPctThreshold
+      );
+      const shotPctTriggered = shotPct.pct != null && shotPct.taken >= minAttempts && shotPct.pct < shotPctThreshold;
+
       const profStats = statsShowTeam
         ? computePositionalProficiency(null)
         : computePositionalProficiency(activeW.id);
@@ -4586,6 +5158,31 @@
               </div>
             </div>
           `).join('')}
+
+          <div style="font-size:11px; font-weight:800; color:var(--gold); text-transform:uppercase; margin:14px 0 6px 0;">
+            Shot % Focus <span style="font-weight:400; text-transform:none;">(Takedown → Shots · trigger &lt; ${shotPctThreshold}%)</span>
+          </div>
+          ${!shotPctTriggered && weakShots.length === 0
+            ? `<p style="color:var(--muted); font-size:12px; margin-bottom:12px;">Shot % is at or above threshold${shotPct.pct != null ? ` (${shotPct.pct}% · ${shotPct.success}/${shotPct.taken})` : " (no shots logged yet)"}.</p>`
+            : `
+            <div style="background:var(--mat); padding:10px; border-radius:4px; margin-bottom:6px; border:1px solid ${shotPctTriggered ? 'var(--red)' : 'var(--panelLine)'};">
+              <div style="display:flex; justify-content:space-between; font-weight:700; font-size:13px; margin-bottom:4px;">
+                <span>Overall Shot Conversion ${shotPctTriggered ? `<span style="font-size:10px; font-weight:800; color:var(--red); margin-left:6px;">[BELOW TRIGGER]</span>` : ""}</span>
+                <span style="font-family:monospace; color:${rateColorPct(shotPct.pct)};">${shotPct.pct == null ? "—" : shotPct.pct + "%"}</span>
+              </div>
+              <div style="font-size:11px; color:var(--muted); margin-bottom:4px;">${shotPct.success}/${shotPct.taken} successful shots · threshold &lt; ${shotPctThreshold}%</div>
+              <div style="font-size:11px; color:var(--chalk);"><strong style="color:var(--gold);">Drill Focus: </strong>Hand-fighting into preferred ties, level-change + penetration step reps, shot selection under resistance, finish chains.</div>
+            </div>
+            ${weakShots.map(r => `
+              <div style="background:var(--mat); padding:10px; border-radius:4px; margin-bottom:6px; border:1px solid var(--panelLine);">
+                <div style="display:flex; justify-content:space-between; font-weight:700; font-size:13px; margin-bottom:4px;">
+                  <span>${r.move} shot (${r.success}/${r.attempts})</span>
+                  <span style="color:var(--red); font-family:monospace;">${r.rate}% Success</span>
+                </div>
+                <div style="font-size:11px; color:var(--chalk);"><strong style="color:var(--green);">Drill Setup: </strong>${r.tieList[0] ? `${r.tieList[0].tie} (${r.tieList[0].rate}% eff)` : "Neutral entry"} — ${DRILLS[r.move] || "Shot penetration and finish reps."}</div>
+              </div>
+            `).join("")}
+          `}
 
           <div style="font-size:11px; font-weight:800; color:var(--gold); text-transform:uppercase; margin:14px 0 6px 0;">
             Offensive Remediation Focus <span style="font-weight:400; text-transform:none;">(&lt; ${offenseThreshold}% conversion threshold)</span>
@@ -4703,6 +5300,8 @@
             </div>
             <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
               <button class="btn btn-gold" style="font-size:11px;" onclick="exportAiTrainingLibrary()" ${aiTrainingLibrary.length ? '' : 'disabled'}>Export Library JSON</button>
+              <button class="btn btn-green" style="font-size:11px;" onclick="exportAiTrainingLibraryForKaggle()" ${aiTrainingLibrary.length ? '' : 'disabled'}>Export for Kaggle</button>
+              <button class="btn btn-green" style="font-size:11px;" onclick="triggerImportAiTrainingLibrary()">Import Library JSON</button>
               <button class="btn btn-red" style="font-size:11px;" onclick="clearAiTrainingLibrary()" ${aiTrainingLibrary.length ? '' : 'disabled'}>Clear Library</button>
             </div>
             ${aiTrainingLibrary.length ? `
@@ -4806,10 +5405,10 @@
           <div style="margin-bottom:14px;">
             <div style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase; margin-bottom:4px;">Training Plan Trigger Thresholds</div>
             <p style="font-size:12px; color:var(--muted); margin-bottom:8px;">
-              Specify the success percentage threshold below which a move will automatically generate targeted remediation drills. Offense and defense are configured separately for individual athletes and for the compiled team.
+              Specify the success percentage threshold below which a move will automatically generate targeted remediation drills. Offense, defense, and <strong>Shot %</strong> (Takedown → Shots) are configured for individual athletes and the compiled team.
             </p>
             <div style="font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:4px;">Individual Athlete</div>
-            <div class="grid-2" style="margin-bottom:10px;">
+            <div class="grid-3" style="margin-bottom:10px;">
               <div>
                 <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Offense Trigger (&lt; %)</label>
                 <input type="number" min="1" max="99" class="input" value="${appConfig.individualOffenseThreshold || 50}" onchange="appConfig.individualOffenseThreshold = Number(this.value) || 50; persist();" />
@@ -4818,9 +5417,13 @@
                 <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Defense Trigger (&lt; %)</label>
                 <input type="number" min="1" max="99" class="input" value="${appConfig.individualDefenseThreshold || 50}" onchange="appConfig.individualDefenseThreshold = Number(this.value) || 50; persist();" />
               </div>
+              <div>
+                <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Shot % Trigger (&lt; %)</label>
+                <input type="number" min="1" max="99" class="input" value="${appConfig.individualShotPctThreshold ?? 40}" onchange="appConfig.individualShotPctThreshold = Number(this.value) || 40; persist();" />
+              </div>
             </div>
             <div style="font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:4px;">Compiled Team</div>
-            <div class="grid-2">
+            <div class="grid-3">
               <div>
                 <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Offense Trigger (&lt; %)</label>
                 <input type="number" min="1" max="99" class="input" value="${appConfig.teamOffenseThreshold || 50}" onchange="appConfig.teamOffenseThreshold = Number(this.value) || 50; persist();" />
@@ -4828,6 +5431,10 @@
               <div>
                 <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Defense Trigger (&lt; %)</label>
                 <input type="number" min="1" max="99" class="input" value="${appConfig.teamDefenseThreshold || 50}" onchange="appConfig.teamDefenseThreshold = Number(this.value) || 50; persist();" />
+              </div>
+              <div>
+                <label style="font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:700;">Shot % Trigger (&lt; %)</label>
+                <input type="number" min="1" max="99" class="input" value="${appConfig.teamShotPctThreshold ?? 40}" onchange="appConfig.teamShotPctThreshold = Number(this.value) || 40; persist();" />
               </div>
             </div>
           </div>
@@ -6063,64 +6670,294 @@
       });
     }
 
+    function inferPeriodFromTimestamp(ts) {
+      const sec = (() => {
+        if (!ts) return 0;
+        const p = String(ts).split(":").map(Number);
+        if (p.length === 2 && p.every(n => !isNaN(n))) return p[0] * 60 + p[1];
+        return 0;
+      })();
+      if (sec < 120) return "P1";
+      if (sec < 240) return "P2";
+      return "P3";
+    }
+
+    function parseTimestampToSeconds(ts) {
+      if (ts == null || ts === "") return null;
+      if (typeof ts === "number" && isFinite(ts)) return Math.max(0, ts);
+      const parts = String(ts).trim().split(":").map(Number);
+      if (parts.length === 2 && parts.every(n => !isNaN(n))) return parts[0] * 60 + parts[1];
+      if (parts.length === 3 && parts.every(n => !isNaN(n))) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+      const n = Number(ts);
+      return isNaN(n) ? null : Math.max(0, n);
+    }
+
+    function formatMmSs(secs) {
+      const s = Math.max(0, Math.floor(secs || 0));
+      return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+    }
+
+    async function extractFramesAtTimes(blob, timesSec, statusCb) {
+      if (!blob || !timesSec || !timesSec.length) return [];
+      const uniqueTimes = Array.from(new Set(timesSec.map(t => Math.max(0, Number(t))).filter(t => isFinite(t)))).sort((a,b)=>a-b);
+      if (!uniqueTimes.length) return [];
+      return new Promise((resolve, reject) => {
+        const video = document.createElement("video");
+        video.preload = "auto"; video.muted = true; video.playsInline = true;
+        const objectUrl = URL.createObjectURL(blob);
+        video.src = objectUrl;
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        const frames = [];
+        video.onloadedmetadata = async () => {
+          try {
+            canvas.width = 320;
+            canvas.height = Math.max(1, Math.round(320 * (video.videoHeight / Math.max(1, video.videoWidth))));
+            const duration = video.duration || 0;
+            for (let i = 0; i < uniqueTimes.length; i++) {
+              const time = Math.min(uniqueTimes[i], Math.max(0, duration - 0.05));
+              if (statusCb) statusCb(`Training frames ${i+1}/${uniqueTimes.length}…`);
+              await new Promise(r => {
+                const onSeeked = () => {
+                  video.removeEventListener("seeked", onSeeked);
+                  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                  frames.push({ time: formatMmSs(time), base64: canvas.toDataURL("image/jpeg", 0.5).split(",")[1], secs: time });
+                  r();
+                };
+                video.addEventListener("seeked", onSeeked);
+                try { video.currentTime = time; } catch (e) { r(); }
+              });
+            }
+            URL.revokeObjectURL(objectUrl);
+            resolve(frames);
+          } catch (err) { URL.revokeObjectURL(objectUrl); reject(err); }
+        };
+        video.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error("Could not decode training video.")); };
+      });
+    }
+
+    function buildStructuredTaxonomyForPrompt() {
+      const groups = {};
+      Object.keys(taxonomy.MOVE_GROUPS || {}).forEach(cat => {
+        const val = taxonomy.MOVE_GROUPS[cat];
+        if (Array.isArray(val)) groups[cat] = val.slice();
+        else if (val && typeof val === "object") {
+          groups[cat] = {};
+          Object.keys(val).forEach(sub => { groups[cat][sub] = (val[sub] || []).slice(); });
+        }
+      });
+      return {
+        MOVE_GROUPS: groups,
+        TIE_MODIFIERS: (taxonomy.TIE_MODIFIERS || []).slice(),
+        FINISH_MODIFIERS: (taxonomy.FINISH_MODIFIERS || []).slice(),
+        RIDE_MODIFIERS: (taxonomy.RIDE_MODIFIERS || []).slice()
+      };
+    }
+
+    function buildMatScoutRulesPrompt(activeW, opponent) {
+      const tax = buildStructuredTaxonomyForPrompt();
+      return (
+        `You are Mat Scout's folkstyle wrestling video scorer.\n` +
+        `Score for OUR wrestler "${activeW.name}" vs "${opponent}".\n` +
+        `OUR WRESTLER VISUAL ID: ${formatOurWrestlerAppearanceText(ourWrestlerAppearance, activeW.name)}\n` +
+        `Opponent is the other athlete.\n\n` +
+        `RULES:\n` +
+        `1) Log technique attempts (success OR fail) and period position CHOICES.\n` +
+        `2) Prefer move names from MOVE_GROUPS. Do not invent free-form moves when taxonomy matches.\n` +
+        `3) When visible, set tie/finish/ride from modifier lists only.\n` +
+        `4) direction "offense" = our wrestler (matching ankle band/singlet); "defense" = opponent.\n` +
+        `5) Period choices: referee/wrestler hand signals Top/Bottom/Neutral/Defer → category Choice, move "Home Choice: Bottom" etc. Use confidence low if unclear.\n` +
+        `6) confidence high|medium|low. Prefer low when unsure.\n` +
+        `7) Return ONLY a JSON array. Fields: category, subCategory, move, direction, outcome, timestamp, period, confidence, tie, finish, ride, detail.\n\n` +
+        `TAXONOMY:\n` + JSON.stringify(tax) + `\n`
+      );
+    }
+
+    function pickScorableEvents(events, maxN) {
+      return (events || []).filter(e => e && e.category !== "Flow").filter(e => parseTimestampToSeconds(e.timestamp) != null).slice(0, maxN);
+    }
+
+    function eventLabelLine(e) {
+      const bits = [e.timestamp||"", e.category||"", e.move||"", e.direction||"", e.outcome||""];
+      if (e.tie) bits.push("tie:"+e.tie);
+      if (e.detail) bits.push("detail:"+e.detail);
+      return bits.filter(Boolean).join(" | ");
+    }
+
+    async function buildTrainingFewShotParts(statusCb) {
+      const parts = [];
+      let visionCount = 0, labelCount = 0, visionFrameCount = 0;
+      if (!aiTrainingLibrary || !aiTrainingLibrary.length) return { parts, visionCount, labelCount, visionFrameCount };
+      const newest = aiTrainingLibrary.slice().reverse();
+      const withVideo = newest.filter(ex => ex && ex.video && ex.video.type === "file" && ex.video.hasLocalBlob && ex.id);
+      const visionTargets = withVideo.slice(0, 3);
+      if (visionTargets.length) {
+        parts.push({ text: "=== VISUAL TRAINING EXAMPLES (coach-verified) ===\nFrame + correct label. Learn move appearance.\n" });
+      }
+      for (let vi = 0; vi < visionTargets.length; vi++) {
+        const ex = visionTargets[vi];
+        if (statusCb) statusCb(`Loading training video ${vi+1}/${visionTargets.length}…`);
+        let blob = null;
+        try { blob = await idbGetTrainingVideo(ex.id); } catch (e) { blob = null; }
+        if (!blob) continue;
+        const scorable = pickScorableEvents(ex.events, 6);
+        if (!scorable.length) continue;
+        const times = scorable.map(e => parseTimestampToSeconds(e.timestamp)).filter(t => t != null);
+        let frames = [];
+        try { frames = await extractFramesAtTimes(blob, times, statusCb); } catch (e) { continue; }
+        if (!frames.length) continue;
+        if (ex.ourAppearanceText) parts.push({ text: `Training match our wrestler ID: ${ex.ourAppearanceText}\n` });
+        for (const e of scorable) {
+          const sec = parseTimestampToSeconds(e.timestamp);
+          if (sec == null) continue;
+          let best = null, bestDist = Infinity;
+          for (const f of frames) {
+            const d = Math.abs((f.secs != null ? f.secs : parseTimestampToSeconds(f.time)) - sec);
+            if (d < bestDist) { bestDist = d; best = f; }
+          }
+          if (!best || bestDist > 2.5) continue;
+          parts.push({ text: `TRAINING FRAME @ ${e.timestamp || best.time} — LABEL: ${eventLabelLine(e)}` });
+          parts.push({ inline_data: { mime_type: "image/jpeg", data: best.base64 } });
+          visionFrameCount++;
+        }
+        visionCount++;
+      }
+      if (visionCount) parts.push({ text: "\n=== END VISUAL TRAINING ===\n" });
+      const labelTargets = newest.slice(0, 6);
+      if (labelTargets.length) {
+        const blocks = labelTargets.map((ex, i) => ({
+          example: i + 1,
+          wrestler: ex.wrestlerName || "Athlete",
+          opponent: ex.opponent || "Opp",
+          ourAppearance: ex.ourAppearance || null,
+          ourAppearanceText: ex.ourAppearanceText || "",
+          events: pickScorableEvents(ex.events, 24).map(e => ({
+            category: e.category||"", move: e.move||"", direction: e.direction||"", outcome: e.outcome||"",
+            timestamp: e.timestamp||"", tie: e.tie||undefined, detail: e.detail||undefined, period: e.period||undefined
+          }))
+        }));
+        parts.push({ text: "\n=== LABEL TRAINING LOGS ===\n" + JSON.stringify(blocks) + "\n=== END LABEL LOGS ===\n" });
+        labelCount = labelTargets.length;
+      }
+      return { parts, visionCount, labelCount, visionFrameCount };
+    }
+
+    function normalizeAiEventToManualFormat(raw, activeW) {
+      const e = raw && typeof raw === "object" ? raw : {};
+      let category = e.category || "Takedown";
+      let move = e.move || e.raw_move || "Undefined";
+      let direction = e.direction === "defense" ? "defense" : "offense";
+      let outcome = e.outcome === "fail" ? "fail" : "success";
+      let confidence = String(e.confidence || "medium").toLowerCase();
+      if (confidence !== "high" && confidence !== "low") confidence = "medium";
+      let detail = e.detail || "";
+      if (category === "Choice" || /choice/i.test(String(move)) || /defer/i.test(String(move))) {
+        category = "Choice"; outcome = "success";
+        const m = String(move);
+        if (!detail) {
+          if (/top/i.test(m)) detail = "Top";
+          else if (/bottom/i.test(m)) detail = "Bottom";
+          else if (/neutral/i.test(m)) detail = "Neutral";
+          else if (/defer/i.test(m)) detail = "Defer";
+          else detail = "Neutral";
+        }
+        const chooser = /opponent/i.test(m) ? "Opponent" : "Home";
+        move = `${chooser} Choice: ${detail}`;
+        direction = chooser === "Home" ? "offense" : "defense";
+      }
+      const mods = [];
+      if (e.tie) mods.push(String(e.tie));
+      if (e.finish && !mods.includes(String(e.finish))) mods.push(String(e.finish));
+      if (e.ride && !mods.includes(String(e.ride))) mods.push(String(e.ride));
+      const tie = mods.join(" + ");
+      let points = 0;
+      if (category === "Choice" || category === "Flow") points = 0;
+      else if (category === "Near Fall / Pin") {
+        const src = move + " " + detail;
+        if (/pin/i.test(src)) { points = 0; detail = detail || "Pin / Fall"; }
+        else if (/4/.test(src)) points = 4;
+        else if (/3/.test(src)) points = 3;
+        else if (/2/.test(src)) points = 2;
+        if (outcome === "fail" && direction === "offense") points = 0;
+      } else if (isPenaltyCategory(category)) points = typeof e.points === "number" ? e.points : 1;
+      else if (outcome === "success") points = getPointValue(category, move);
+      else if (outcome === "fail" && direction === "defense") points = getPointValue(category, move);
+      const timestamp = e.timestamp || "";
+      return {
+        id: Math.random().toString(36).slice(2, 9),
+        matchId: null,
+        wrestlerId: activeW ? activeW.id : null,
+        boutId: store.activeBoutId,
+        period: e.period || inferPeriodFromTimestamp(timestamp),
+        category, subCategory: e.subCategory || null, move, tie, direction, outcome, points, detail, timestamp,
+        confidence, source: "ai", ts: Date.now()
+      };
+    }
+
     async function runDirectBrowserAnalysis() {
       const activeW = getActiveWrestler();
       if (!activeW) return alert("Select an active wrestler first.");
-
       const key = document.getElementById("imp-key").value.trim();
       const opponent = document.getElementById("imp-opp").value.trim() || "Opponent";
-
+      aiImportOpponent = opponent;
       if (!key) return alert("Please enter your Gemini API Key.");
       if (!selectedVideoFile) return alert("Please select a video file.");
-
+      const hasVisualId =
+        (ourWrestlerAppearance.ankleBand && ourWrestlerAppearance.ankleBand !== "none") ||
+        (ourWrestlerAppearance.singletColor && ourWrestlerAppearance.singletColor.trim());
+      if (!hasVisualId) {
+        if (!confirm("No ankle band or singlet color set for your wrestler.\\n\\nAI may confuse offense/defense. Continue anyway?")) return;
+      }
       localStorage.setItem(API_KEY_STORAGE, key);
       const statusDiv = document.getElementById("ai-status");
       const aiBtn = document.getElementById("ai-btn");
       statusDiv.style.display = "block";
       aiBtn.disabled = true;
-
       try {
-        const frames = await extractFrames(selectedVideoFile, (txt) => { statusDiv.textContent = txt; });
-        statusDiv.textContent = `Analyzing ${frames.length} frames with Gemini...`;
-
-        const contentsParts = [
-          {
-            text: `You are scoring a wrestling match for wrestler "${activeW.name}" vs "${opponent}". Takedowns score 3 points.
-Watch sequential frames and return ONLY a JSON array of scoring actions with:
-- "category": ("Takedown", "Escape", "Reversal", "Turns", "Near Fall / Pin", "Penalty/DQ")
-- "move": specific move name
-- "raw_move": specific move name or setup
-- "direction": "offense" or "defense"
-- "outcome": "success" or "fail"
-- "timestamp": mm:ss
-- "confidence": "high", "medium", or "low"`
-          }
-        ];
-
+        statusDiv.textContent = "Preparing Mat Scout rules + training examples…";
+        const fewShot = await buildTrainingFewShotParts((txt) => { if (statusDiv) statusDiv.textContent = txt; });
+        const frames = await extractFrames(selectedVideoFile, (txt) => { if (statusDiv) statusDiv.textContent = txt; });
+        const trainBits = [];
+        if (fewShot.visionFrameCount) trainBits.push(fewShot.visionFrameCount + " labeled frames");
+        if (fewShot.labelCount) trainBits.push(fewShot.labelCount + " label logs");
+        statusDiv.textContent = `Analyzing ${frames.length} frames` + (trainBits.length ? " · " + trainBits.join(" + ") : " · taxonomy only") + "…";
+        const systemPrompt = buildMatScoutRulesPrompt(activeW, opponent) +
+          (fewShot.visionFrameCount ? "Use visual training frames to recognize the same moves.\\n" : "") +
+          (fewShot.labelCount ? "Match labeling style from the label logs.\\n" : "");
+        const contentsParts = [{ text: systemPrompt }];
+        fewShot.parts.forEach(p => contentsParts.push(p));
+        contentsParts.push({ text: `\\n=== NEW MATCH TO SCORE ===\\n${activeW.name} vs ${opponent}. Sequential frames follow. JSON array only.\\n` });
         frames.forEach(f => {
           contentsParts.push({ text: `Frame Time: ${f.time}` });
           contentsParts.push({ inline_data: { mime_type: "image/jpeg", data: f.base64 } });
         });
-
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key=${key}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contents: [{ parts: contentsParts }] })
-        });
-
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error?.message || "Gemini API error.");
+        const AI_MODEL_CANDIDATES = ["gemini-3.7-flash","gemini-3.6-flash","gemini-3.5-flash","gemini-2.5-flash"];
+        let data = null, lastErr = null;
+        for (const modelId of AI_MODEL_CANDIDATES) {
+          statusDiv.textContent = `Analyzing ${frames.length} frames with ${modelId}…`;
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${key}`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ contents: [{ parts: contentsParts }] })
+          });
+          if (res.ok) { data = await res.json(); break; }
+          let errMsg = "Gemini API error.";
+          try { const errData = await res.json(); errMsg = errData.error?.message || errMsg; } catch (e) {}
+          lastErr = errMsg;
+          const overloaded = /high demand|overloaded|try again later|resource exhausted|unavailable|503|429/i.test(errMsg) || res.status === 503 || res.status === 429;
+          if (!overloaded) throw new Error(errMsg);
+          await new Promise(r => setTimeout(r, 600));
         }
-
-        const data = await res.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
-        let clean = text.trim();
+        if (!data) throw new Error((lastErr || "All Gemini models unavailable.") + " Try again shortly.");
+        const textOut = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
+        let clean = textOut.trim();
         if (clean.startsWith("```")) clean = clean.split("```")[1].replace(/^json/, "");
-        
-        parsedEvents = JSON.parse(clean).map(e => ({ ...e, id: Math.random().toString(36).slice(2, 9) }));
+        const parsed = JSON.parse(clean);
+        if (!Array.isArray(parsed)) throw new Error("Model did not return a JSON array.");
+        parsedEvents = parsed.map(e => normalizeAiEventToManualFormat(e, activeW));
         selectedEvents = {};
-        parsedEvents.forEach(e => { selectedEvents[e.id] = e.confidence !== 'low'; });
+        parsedEvents.forEach(e => { selectedEvents[e.id] = (e.confidence || "").toLowerCase() !== "low"; });
+        aiVerifyFilter = "all";
+        editingAiEventId = null;
         render();
       } catch (err) {
         alert("Analysis Error: " + err.message);
@@ -6130,28 +6967,66 @@ Watch sequential frames and return ONLY a JSON array of scoring actions with:
     }
 
     function toggleSelect(id) { selectedEvents[id] = !selectedEvents[id]; render(); }
-    function toggleEvDir(idx) { parsedEvents[idx].direction = parsedEvents[idx].direction === 'offense' ? 'defense' : 'offense'; render(); }
-    function toggleEvOutcome(idx) { parsedEvents[idx].outcome = parsedEvents[idx].outcome === 'success' ? 'fail' : 'success'; render(); }
-    function swapAllDir() { parsedEvents.forEach(e => { e.direction = e.direction === 'offense' ? 'defense' : 'offense'; }); render(); }
-    function cancelImport() { parsedEvents = null; render(); }
+    function toggleEvDir(idx) {
+      if (!parsedEvents || !parsedEvents[idx]) return;
+      parsedEvents[idx].direction = parsedEvents[idx].direction === "offense" ? "defense" : "offense";
+      recalcAiEventPoints(idx);
+    }
+    function toggleEvOutcome(idx) {
+      if (!parsedEvents || !parsedEvents[idx]) return;
+      if (parsedEvents[idx].category === "Choice") return;
+      parsedEvents[idx].outcome = parsedEvents[idx].outcome === "success" ? "fail" : "success";
+      recalcAiEventPoints(idx);
+    }
+    function swapAllDir() {
+      if (!parsedEvents) return;
+      parsedEvents.forEach((e, i) => {
+        e.direction = e.direction === "offense" ? "defense" : "offense";
+      });
+      parsedEvents.forEach((_, i) => {
+        const e = parsedEvents[i];
+        if (e.category === "Choice" || e.category === "Flow") e.points = 0;
+        else if (isPenaltyCategory(e.category)) {}
+        else if (e.category === "Near Fall / Pin") {
+          const src = (e.move||"")+" "+(e.detail||"");
+          if (/pin/i.test(src)) e.points = 0;
+          else if (/4/.test(src)) e.points = 4;
+          else if (/3/.test(src)) e.points = 3;
+          else if (/2/.test(src)) e.points = 2;
+          if (e.outcome === "fail" && e.direction === "offense") e.points = 0;
+        } else if (e.outcome === "success") e.points = getPointValue(e.category, e.move);
+        else if (e.outcome === "fail" && e.direction === "defense") e.points = getPointValue(e.category, e.move);
+        else e.points = 0;
+      });
+      render();
+    }
+    function cancelImport() {
+      parsedEvents = null; selectedEvents = {}; editingAiEventId = null; aiVerifyFilter = "all"; render();
+    }
 
     function commitImport() {
       const activeW = getActiveWrestler();
       const season = getActiveSeason();
       if (!activeW) return;
-      const opponent = document.getElementById("imp-opp")?.value.trim() || "Opponent";
+      const selected = (parsedEvents || []).filter(e => selectedEvents[e.id]);
+      if (!selected.length) return alert("Select at least one event to commit.");
+      const opponent = aiImportOpponent || document.getElementById("imp-opp")?.value.trim() || "Opponent";
       const matchId = Math.random().toString(36).slice(2, 9);
-      season.matches.push({ id: matchId, wrestlerId: activeW.id, boutId: store.activeBoutId, opponent, level: selectedMatchLevel, date: new Date().toISOString().slice(0, 10), source: "video" });
-      parsedEvents.filter(e => selectedEvents[e.id]).forEach(e => {
+      season.matches.push({
+        id: matchId, wrestlerId: activeW.id, boutId: store.activeBoutId, opponent,
+        level: selectedMatchLevel, date: new Date().toISOString().slice(0, 10), source: "video"
+      });
+      selected.forEach(e => {
         season.events.push({
-          id: e.id, matchId, wrestlerId: activeW.id, boutId: store.activeBoutId, category: e.category || "Takedown",
-          move: e.move || "Unknown", rawMove: e.raw_move || e.move,
-          direction: e.direction || "offense", outcome: e.outcome || "success", 
-          timestamp: e.timestamp || "",
-          ts: Date.now()
+          id: e.id, matchId, wrestlerId: activeW.id, boutId: store.activeBoutId,
+          period: e.period || "P1", category: e.category || "Takedown", subCategory: e.subCategory || null,
+          move: e.move || "Unknown", tie: e.tie || "", direction: e.direction || "offense",
+          outcome: e.outcome || "success", points: typeof e.points === "number" ? e.points : 0,
+          detail: e.detail || "", timestamp: e.timestamp || "", confidence: e.confidence || "",
+          source: "ai", ts: Date.now()
         });
       });
-      parsedEvents = null;
+      parsedEvents = null; selectedEvents = {}; editingAiEventId = null;
       persist();
       switchTab("sheet");
     }
