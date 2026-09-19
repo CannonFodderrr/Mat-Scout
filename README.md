@@ -19,6 +19,8 @@ Import Live Scoring from a Companion App - MatSide
 
 Custom Stats
 
+Develop AI Training Plans
+
 Create and Assign Awards
 
 Track Gear Issue and Attendance 
