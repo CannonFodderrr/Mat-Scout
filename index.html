@@ -13115,6 +13115,21 @@ const teamOpsBody = `
               <option value="drive" ${(appConfig.downloadTarget || 'drive') === 'drive' ? 'selected' : ''}>Google Drive (when connected)</option>
               <option value="local" ${appConfig.downloadTarget === 'local' ? 'selected' : ''}>Hard drive (browser download)</option>
             </select>
+            <div style="margin:10px 0 12px 0; padding:10px; background:var(--mat); border:1px solid var(--panelLine); border-radius:6px;">
+              <div class="sub-label" style="margin-bottom:6px;">Local hard drive (when not on Google Drive)</div>
+              <p style="font-size:10px; color:var(--muted); margin:0 0 8px 0;">
+                Status: <strong style="color:var(--chalk);">${typeof localSwStatusText === "function" ? localSwStatusText() : "—"}</strong>
+              </p>
+              <p style="font-size:10px; color:var(--muted); margin:0 0 8px 0;">
+                Choose a parent folder (e.g. Documents). The app creates <strong>Strategic Wrestler</strong> inside it, then:
+                <strong>Backups</strong>, <strong>Exports</strong>, <strong>Season Archives</strong>, <strong>AI Library</strong>, <strong>MatSide</strong>.
+                If those folders already exist, they are reused.
+              </p>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                <button type="button" class="btn btn-green" style="font-size:11px;" onclick="pickLocalSwRootFolder()">Choose local Strategic Wrestler folder</button>
+                <button type="button" class="btn" style="font-size:11px; background:var(--panelLine); color:var(--chalk);" onclick="clearLocalSwRootFolder()">Clear local folder</button>
+              </div>
+            </div>
             <div class="sub-label" style="margin-bottom:6px;">Drive folders</div>
             <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
               <button type="button" class="btn btn-gold" style="font-size:11px;" onclick="pickGoogleDriveFolder('backup')">Backups folder</button>
@@ -13616,8 +13631,8 @@ const aiBody = `
       const storageBody = `
         <p style="font-size:11px; color:var(--muted); margin:0 0 10px 0;">
           Browser local storage holds seasons, taxonomy, awards, and training metadata. Video blobs in IndexedDB are separate.
-          <br/><strong style="color:var(--gold);">Export Full Backup</strong> is the same full JSON as top-bar <strong>Save</strong> (all seasons, settings, libraries) — it uses the Backups Drive folder when connected.
-          <strong>Validate Backup File</strong> checks a backup JSON without loading it. <strong>Refresh Status</strong> recalculates storage use after saves/archives.
+          <br/><strong style="color:var(--gold);">Export Full Backup</strong> is the same full JSON as top-bar <strong>Save</strong> (all seasons, settings, libraries) — Drive Backups folder when connected, otherwise local <strong>Strategic Wrestler/Backups</strong>.
+          <strong>Validate Backup File</strong> checks a backup JSON without loading it (lists Backups on Drive when connected, or a local file). <strong>Refresh Status</strong> recalculates storage use after saves/archives.
         </p>
         <div class="grid-3" style="margin-bottom:10px;">
           <div style="background:var(--mat); border:1px solid var(--panelLine); border-radius:6px; padding:10px; text-align:center;">
@@ -16929,6 +16944,179 @@ async function callLocalLoraPredict(systemText, frames, statusDiv) {
       }
     }
 
+    /* ========== Local hard-drive folders (File System Access API) ==========
+       Layout when a local root is chosen:
+         Strategic Wrestler/
+           Backups/
+           Exports/
+           Season Archives/
+           AI Library/
+           MatSide/
+       Browsers cannot write arbitrary paths without user permission; once the coach
+       picks (or creates) the Strategic Wrestler folder, we create the subfolders. */
+    const LOCAL_SW_ROOT_NAME = "Strategic Wrestler";
+    const LOCAL_SW_SUBFOLDERS = Object.freeze({
+      backup: "Backups",
+      exports: "Exports",
+      archives: "Season Archives",
+      aiLibrary: "AI Library",
+      matside: "MatSide"
+    });
+    let localSwRootHandle = null; // FileSystemDirectoryHandle
+    const LOCAL_SW_IDB_NAME = "mat-scout-local-fs";
+    const LOCAL_SW_IDB_STORE = "handles";
+    const LOCAL_SW_IDB_KEY = "strategic-wrestler-root";
+
+    function localSwSubfolderName(purpose) {
+      return LOCAL_SW_SUBFOLDERS[purpose] || LOCAL_SW_SUBFOLDERS.exports;
+    }
+    function supportsLocalFolderApi() {
+      return typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
+    }
+    function openLocalSwIdb() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(LOCAL_SW_IDB_NAME, 1);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains(LOCAL_SW_IDB_STORE)) db.createObjectStore(LOCAL_SW_IDB_STORE);
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error || new Error("IndexedDB open failed"));
+      });
+    }
+    async function saveLocalSwRootHandle(handle) {
+      localSwRootHandle = handle;
+      try {
+        const db = await openLocalSwIdb();
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction(LOCAL_SW_IDB_STORE, "readwrite");
+          tx.objectStore(LOCAL_SW_IDB_STORE).put(handle, LOCAL_SW_IDB_KEY);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+        db.close();
+      } catch (e) { console.warn("Could not persist local folder handle", e); }
+    }
+    async function loadLocalSwRootHandle() {
+      if (localSwRootHandle) return localSwRootHandle;
+      try {
+        const db = await openLocalSwIdb();
+        const handle = await new Promise((resolve, reject) => {
+          const tx = db.transaction(LOCAL_SW_IDB_STORE, "readonly");
+          const req = tx.objectStore(LOCAL_SW_IDB_STORE).get(LOCAL_SW_IDB_KEY);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => reject(req.error);
+        });
+        db.close();
+        if (handle) localSwRootHandle = handle;
+        return handle || null;
+      } catch (e) {
+        return null;
+      }
+    }
+    async function ensureLocalSwPermission(handle, mode) {
+      mode = mode || "readwrite";
+      if (!handle) return false;
+      try {
+        const q = await handle.queryPermission({ mode });
+        if (q === "granted") return true;
+        const r = await handle.requestPermission({ mode });
+        return r === "granted";
+      } catch (e) {
+        return false;
+      }
+    }
+    async function pickLocalSwRootFolder() {
+      if (!supportsLocalFolderApi()) {
+        toast(
+          "This browser cannot choose a save folder.\\n\\nUse Chrome / Edge / Opera, or keep using the Downloads folder.\\nGoogle Drive is unaffected.",
+          "info",
+          8000
+        );
+        return null;
+      }
+      try {
+        const handle = await window.showDirectoryPicker({
+          id: "strategic-wrestler-root",
+          mode: "readwrite",
+          startIn: "documents"
+        });
+        // If user picked a parent, ensure/create "Strategic Wrestler" inside it;
+        // if they already picked a folder named Strategic Wrestler, use it as root.
+        let root = handle;
+        if (String(handle.name || "").trim() !== LOCAL_SW_ROOT_NAME) {
+          root = await handle.getDirectoryHandle(LOCAL_SW_ROOT_NAME, { create: true });
+        }
+        await saveLocalSwRootHandle(root);
+        await ensureLocalSwSubfolders(root);
+        toast(
+          "Local folder set: …/" + (handle.name === LOCAL_SW_ROOT_NAME ? LOCAL_SW_ROOT_NAME : (handle.name + "/" + LOCAL_SW_ROOT_NAME)) +
+          "\\nSubfolders: Backups, Exports, Season Archives, AI Library, MatSide",
+          "success",
+          7000
+        );
+        try { render(); } catch (e) {}
+        return root;
+      } catch (e) {
+        if (e && e.name === "AbortError") return null;
+        toast("Could not set local folder: " + (e.message || e), "error", 8000);
+        return null;
+      }
+    }
+    async function clearLocalSwRootFolder() {
+      localSwRootHandle = null;
+      try {
+        const db = await openLocalSwIdb();
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction(LOCAL_SW_IDB_STORE, "readwrite");
+          tx.objectStore(LOCAL_SW_IDB_STORE).delete(LOCAL_SW_IDB_KEY);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+        db.close();
+      } catch (e) {}
+      toast("Local Strategic Wrestler folder cleared on this browser.", "info");
+      try { render(); } catch (e) {}
+    }
+    async function ensureLocalSwSubfolders(root) {
+      root = root || localSwRootHandle || await loadLocalSwRootHandle();
+      if (!root) return null;
+      if (!(await ensureLocalSwPermission(root, "readwrite"))) return null;
+      const map = {};
+      for (const key of Object.keys(LOCAL_SW_SUBFOLDERS)) {
+        const name = LOCAL_SW_SUBFOLDERS[key];
+        map[key] = await root.getDirectoryHandle(name, { create: true });
+      }
+      return map;
+    }
+    async function getLocalSwSubfolderHandle(purpose) {
+      const root = localSwRootHandle || await loadLocalSwRootHandle();
+      if (!root) return null;
+      if (!(await ensureLocalSwPermission(root, "readwrite"))) return null;
+      const name = localSwSubfolderName(purpose);
+      return root.getDirectoryHandle(name, { create: true });
+    }
+    async function writeToLocalSwFolder(purpose, filename, blob) {
+      const dir = await getLocalSwSubfolderHandle(purpose);
+      if (!dir) return null;
+      const safeName = String(filename || "file").replace(/[\\\\/:*?"<>|]/g, "_");
+      const fh = await dir.getFileHandle(safeName, { create: true });
+      const writable = await fh.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return {
+        pathLabel: LOCAL_SW_ROOT_NAME + "/" + localSwSubfolderName(purpose),
+        filename: safeName
+      };
+    }
+    function localSwStatusText() {
+      if (!supportsLocalFolderApi()) return "Not available in this browser (use Chrome/Edge, or Google Drive)";
+      if (localSwRootHandle) return "Ready · " + LOCAL_SW_ROOT_NAME + "/ (subfolders auto-created)";
+      return "Not set — downloads go to browser Downloads until you choose a folder";
+    }
+    // Restore handle on boot (permission may still need a user gesture later)
+    try { loadLocalSwRootHandle(); } catch (e) {}
+
     function preferGoogleDriveSaves() {
       // Use Drive whenever connected (user preference) unless explicitly set to local
       if ((appConfig.downloadTarget || "local") === "local" && !isGoogleSignedIn()) return false;
@@ -17006,39 +17194,53 @@ async function callLocalLoraPredict(systemText, frames, statusDiv) {
       return uploadBlobToGoogleDrive(folderId, filename, blob, mime);
     }
     async function downloadOrDriveExport(filename, textOrBlob, mime, purpose) {
-      purpose = purpose === "backup" ? "backup" : "exports";
-      const useDrive = preferGoogleDriveWhenConnected();
+      const validPurposes = { backup:1, exports:1, archives:1, aiLibrary:1, matside:1 };
+      if (!validPurposes[purpose]) purpose = "exports";
+      const blob = (textOrBlob instanceof Blob)
+        ? textOrBlob
+        : new Blob([textOrBlob], { type: mime || "application/json" });
+      const useDrive = preferGoogleDriveWhenConnected() && isGoogleSignedIn();
       if (useDrive) {
         try {
-          if (!isGoogleSignedIn()) await connectGoogleDrive();
           let folder = getDriveFolderForPurpose(purpose);
           if (!folder.id) {
-            await pickGoogleDriveFolder(purpose === "backup" ? "backup" : "exports");
+            await pickGoogleDriveFolder(purpose === "backup" ? "backup" : purpose);
             folder = getDriveFolderForPurpose(purpose);
           }
           if (!folder.id) throw new Error("No Drive folder selected for " + purpose + ".");
-          const blob = (textOrBlob instanceof Blob)
-            ? textOrBlob
-            : new Blob([textOrBlob], { type: mime || "application/json" });
           const file = await uploadBlobToGoogleDrive(folder.id, filename, blob, mime || blob.type || "application/json");
           toast("Saved to Google Drive (" + folder.name + "): " + (file.name || filename), "success", 6000);
           return { target: "drive", file };
         } catch (e) {
           const msg = formatGoogleApiError(e && e.message ? e.message : e);
-          toast("Drive export failed: " + msg + "\n\nFalling back to local download.", "error", 60000);
+          toast("Drive export failed: " + msg + "\n\nTrying local Strategic Wrestler folders…", "error", 20000);
           // fall through to local
         }
       }
-      const blob = (textOrBlob instanceof Blob)
-        ? textOrBlob
-        : new Blob([textOrBlob], { type: mime || "application/json" });
+      // Local: prefer File System Access folders under "Strategic Wrestler"
+      try {
+        const written = await writeToLocalSwFolder(purpose, filename, blob);
+        if (written) {
+          toast("Saved to " + written.pathLabel + "/" + filename, "success", 5000);
+          return { target: "local-folder", path: written.pathLabel };
+        }
+      } catch (e) {
+        console.warn("Local folder write failed", e);
+      }
+      // Final fallback: browser Downloads
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = filename;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-      return { target: "local" };
+      const folderHint = localSwSubfolderName(purpose);
+      toast(
+        "Downloaded to browser Downloads folder.\n\nFor organized folders, use Admin → Choose local Strategic Wrestler folder\n(creates Strategic Wrestler/" + folderHint + "/).",
+        "info",
+        7000
+      );
+      return { target: "local-download" };
     }
     async function listDriveFilesInFolder(folderId, opts) {
       opts = opts || {};
@@ -17325,7 +17527,24 @@ async function callLocalLoraPredict(systemText, frames, statusDiv) {
       }
     }
 
+    function runValidateBackupPayload(payload) {
+      const result = validateBackupObject(payload);
+      window.lastMatScoutBackupValidation = result;
+      if (result.valid) {
+        toast(`Backup is structurally valid.${result.warnings.length ? ` ${result.warnings.length} warning(s).` : ""}`, "success", 6000);
+      } else {
+        toast(`Backup validation failed: ${result.errors.slice(0, 3).join(" | ")}`, "error", 10000);
+      }
+      return result;
+    }
     function triggerValidateFullBackup() {
+      if (typeof importJsonFromDriveOrFile === "function") {
+        importJsonFromDriveOrFile("backup", "backup to validate", (data) => {
+          try { runValidateBackupPayload(data); }
+          catch (e) { toast("Could not validate backup: " + (e.message || e), "error", 8000); }
+        });
+        return;
+      }
       const input = document.createElement("input");
       input.type = "file"; input.accept = ".json,application/json";
       input.onchange = async () => {
@@ -17333,10 +17552,7 @@ async function callLocalLoraPredict(systemText, frames, statusDiv) {
         if (!file) return;
         try {
           const payload = JSON.parse(await file.text());
-          const result = validateBackupObject(payload);
-          if (result.valid) toast(`Backup is structurally valid.${result.warnings.length ? ` ${result.warnings.length} warning(s).` : ""}`, "success", 6000);
-          else toast(`Backup validation failed: ${result.errors.slice(0,3).join(" | ")}`, "error", 7000);
-          window.lastMatScoutBackupValidation = result;
+          runValidateBackupPayload(payload);
         } catch (e) {
           toast("Could not read backup JSON: " + (e.message || e), "error", 6000);
         }
