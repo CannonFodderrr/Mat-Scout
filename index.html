@@ -2705,11 +2705,21 @@
       };
       const safe = String(season.name || "season").replace(/[^a-z0-9-_]+/gi, "_").slice(0, 40);
       // Skip full-backup validation (this is a mat-side-sync package, not a season backup)
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const fname = "mat-side-sync_" + safe + ".json";
+      const body = JSON.stringify(payload, null, 2);
+      if (typeof downloadOrDriveExport === "function") {
+        downloadOrDriveExport(fname, body, "application/json", "exports").then(r => {
+          if (r && r.target === "local") {
+            toast("MatSide export downloaded (" + (payload.roster || []).length + " athletes, " + (payload.bouts || []).length + " events).", "success");
+          }
+        });
+        return;
+      }
+      const blob = new Blob([body], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "mat-side-sync_" + safe + ".json";
+      a.download = fname;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -3154,11 +3164,18 @@
       const payload = typeof buildFullBackupPayload === "function" ? buildFullBackupPayload() : {
         type: "mat-scout-full-backup", version: 2, exported_at: new Date().toISOString(), store
       };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const name = "strategic-wrestler-backup_" + new Date().toISOString().slice(0, 10) + ".json";
+      const textPayload = JSON.stringify(payload, null, 2);
+      // Prefer Drive when connected / setting says drive; always safe local fallback inside helper
+      if (typeof downloadOrDriveExport === "function") {
+        downloadOrDriveExport(name, textPayload, "application/json", "backup");
+        return;
+      }
+      const blob = new Blob([textPayload], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "strategic-wrestler-backup_" + new Date().toISOString().slice(0, 10) + ".json";
+      a.download = name;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
     }
@@ -8407,6 +8424,10 @@
     }
 
     function downloadTextFile(filename, text, mime) {
+      if (typeof downloadOrDriveExport === "function") {
+        downloadOrDriveExport(filename, text, mime || "text/plain", "exports");
+        return;
+      }
       const blob = new Blob([text], { type: mime || "text/plain" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -13049,6 +13070,23 @@ const teamOpsBody = `
             <p style="font-size:10px; color:var(--muted); margin:0;">
               Top-bar <strong>Save</strong> uploads into the Backups folder when Google is connected.
               <strong>Load</strong> lists those backups. Use a separate Exports folder for MatSide/CSV exports.
+            </p>
+            <p style="font-size:10px; color:var(--muted); margin:0 0 8px 0;">
+              Set <strong>Default download location</strong> below to <strong>Google Drive</strong> so top-bar Save, full backups, MatSide, and text exports upload instead of downloading.
+            </p>
+            ${(function(){
+              let err = "";
+              try { err = lastDriveError || localStorage.getItem("mat-scout-last-drive-error") || ""; } catch (e) {}
+              if (!err) return "";
+              return '<div style="margin:8px 0 10px;padding:10px;border:1px solid var(--red);border-radius:6px;background:var(--redDim);">' +
+                '<div style="font-size:10px;font-weight:800;color:var(--red);text-transform:uppercase;margin-bottom:6px;">Last Google Drive error (copy this)</div>' +
+                '<div style="font-size:11px;color:var(--chalk);white-space:pre-wrap;max-height:140px;overflow:auto;" id="last-drive-error-text">' + String(err).replace(/</g,"&lt;") + '</div>' +
+                '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">' +
+                '<button type="button" class="btn btn-gold btn-toolbar" onclick="(async()=>{try{await navigator.clipboard.writeText(document.getElementById(\'last-drive-error-text\').innerText);toast(\'Error copied\',\'success\');}catch(e){prompt(\'Copy error:\',document.getElementById(\'last-drive-error-text\').innerText);}})()">Copy error</button>' +
+                '<button type="button" class="btn btn-toolbar" style="background:var(--panelLine);color:var(--chalk);" onclick="lastDriveError=\'\';try{localStorage.removeItem(\'mat-scout-last-drive-error\');}catch(e){}render();">Clear</button>' +
+                '</div></div>';
+            })()}
+            <p style="font-size:10px; color:var(--muted); margin:0 0 8px 0;">
               Share both folders with every coach (Editor). Same Client ID + Connect Google once per browser.
             </p>
             <label class="field-label" style="margin-top:10px;">Optional folder link (bookmark only)</label>
@@ -13134,7 +13172,7 @@ const teamOpsBody = `
         `}
         <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--panelLine);">
           <label class="field-label">Default download location</label>
-          <select class="select" onchange="appConfig.downloadTarget = this.value; persist();">
+          <select class="select" onchange="appConfig.downloadTarget = this.value; persist(); toast(this.value === 'drive' ? 'Saves/exports will prefer Google Drive when connected.' : 'Saves/exports will download to this computer.', 'info', 4000);">
             <option value="local" ${(appConfig.downloadTarget || 'local') === 'local' ? 'selected' : ''}>Hard drive (browser download)</option>
             <option value="drive" ${appConfig.downloadTarget === 'drive' ? 'selected' : ''}>Google Drive (when connected)</option>
           </select>
@@ -16322,22 +16360,90 @@ async function callLocalLoraPredict(systemText, frames, statusDiv) {
       return `${prefix}_${Date.now().toString(36)}_${idFallbackCounter.toString(36)}`;
     }
 
+    let lastDriveError = "";
+    function formatGoogleApiError(raw) {
+      const s = String(raw == null ? "" : raw).trim();
+      if (!s) return "Unknown Google API error";
+      try {
+        const j = JSON.parse(s);
+        const e = j.error || j;
+        const msg = e.message || e.error_description || e.status || s;
+        const code = e.code || e.status;
+        const reasons = [];
+        if (Array.isArray(e.errors)) e.errors.forEach(x => { if (x && x.reason) reasons.push(x.reason); if (x && x.message) reasons.push(x.message); });
+        let out = (code ? ("[" + code + "] ") : "") + msg;
+        if (reasons.length) out += " · " + reasons.slice(0, 3).join("; ");
+        // Helpful hints for common Drive failures
+        const low = out.toLowerCase();
+        if (/access not configured|drive api has not been used|has not been enabled/i.test(low)) {
+          out += "\n\nFix: In Google Cloud Console enable Google Drive API for this OAuth project.";
+        } else if (/origin|unauthorized client|redirect_uri/i.test(low)) {
+          out += "\n\nFix: Add this page's origin under OAuth Client → Authorized JavaScript origins (file:// often fails — serve over http://localhost).";
+        } else if (/insufficient|permission|forbidden|403/i.test(low)) {
+          out += "\n\nFix: Re-Connect Google, re-pick the Backups folder with the Picker (drive.file scope only sees folders you pick).";
+        } else if (/not found|404/i.test(low)) {
+          out += "\n\nFix: Folder id may be wrong or inaccessible. Use Backups folder button and pick again.";
+        }
+        return out;
+      } catch (_) {
+        return s.length > 800 ? s.slice(0, 800) + "…" : s;
+      }
+    }
     function showToast(message, kind = "info", duration = 3600) {
       let host = document.getElementById("mat-scout-toast-host");
       if (!host) {
         host = document.createElement("div");
         host.id = "mat-scout-toast-host";
-        host.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);bottom:24px;z-index:99999;display:flex;flex-direction:column;align-items:center;gap:8px;max-width:min(460px,calc(100vw - 32px));pointer-events:none;";
+        host.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);bottom:24px;z-index:99999;display:flex;flex-direction:column;align-items:center;gap:8px;max-width:min(560px,calc(100vw - 24px));pointer-events:none;";
         document.body.appendChild(host);
       }
       const el = document.createElement("div");
-      el.textContent = String(message == null ? "" : message);
       const border = kind === "error" ? "var(--red)" : kind === "success" ? "var(--green)" : "var(--gold)";
       const flash = kind === "error" ? "rgba(194,59,34,.6)" : kind === "success" ? "rgba(47,122,79,.6)" : "rgba(217,164,65,.6)";
       el.className = "sw-toast";
-      el.style.cssText = `--flashColor:${flash};pointer-events:auto;text-align:center;background:var(--panel,#202020);color:var(--chalk,#fff);border:1.5px solid ${border};border-radius:8px;padding:11px 16px;font-size:12.5px;font-weight:600;line-height:1.35;box-shadow:0 8px 24px rgba(0,0,0,.45);white-space:pre-wrap;`;
+      el.style.cssText = `--flashColor:${flash};pointer-events:auto;text-align:left;background:var(--panel,#202020);color:var(--chalk,#fff);border:1.5px solid ${border};border-radius:8px;padding:11px 14px;font-size:12.5px;font-weight:600;line-height:1.4;box-shadow:0 8px 24px rgba(0,0,0,.45);white-space:pre-wrap;max-height:min(50vh,360px);overflow:auto;`;
+      const msg = String(message == null ? "" : message);
+      if (kind === "error") {
+        lastDriveError = msg;
+        try { localStorage.setItem("mat-scout-last-drive-error", msg); } catch (e) {}
+        try { console.error("[Strategic Wrestler]", msg); } catch (e) {}
+        const body = document.createElement("div");
+        body.textContent = msg;
+        el.appendChild(body);
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;";
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.textContent = "Copy error";
+        copyBtn.style.cssText = "pointer-events:auto;cursor:pointer;font-size:11px;font-weight:800;padding:5px 10px;border-radius:4px;border:1px solid var(--gold);background:var(--goldDim);color:var(--gold);";
+        copyBtn.onclick = async (ev) => {
+          ev.stopPropagation();
+          try {
+            await navigator.clipboard.writeText(msg);
+            copyBtn.textContent = "Copied";
+          } catch (e) {
+            try {
+              const ta = document.createElement("textarea");
+              ta.value = msg; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
+              copyBtn.textContent = "Copied";
+            } catch (e2) { prompt("Copy this error:", msg); }
+          }
+        };
+        const closeBtn = document.createElement("button");
+        closeBtn.type = "button";
+        closeBtn.textContent = "Dismiss";
+        closeBtn.style.cssText = "pointer-events:auto;cursor:pointer;font-size:11px;font-weight:800;padding:5px 10px;border-radius:4px;border:1px solid var(--panelLine);background:var(--mat);color:var(--chalk);";
+        closeBtn.onclick = (ev) => { ev.stopPropagation(); el.remove(); };
+        row.appendChild(copyBtn);
+        row.appendChild(closeBtn);
+        el.appendChild(row);
+        // Errors stay until dismissed (or long timeout)
+        duration = Math.max(duration || 0, 60000);
+      } else {
+        el.textContent = msg;
+      }
       host.appendChild(el);
-      window.setTimeout(() => el.remove(), duration);
+      if (duration > 0) window.setTimeout(() => { try { el.remove(); } catch (e) {} }, duration);
     }
     function toast(message, kind = "info", duration = 3600) { showToast(message, kind, duration); }
 
@@ -16733,40 +16839,115 @@ async function callLocalLoraPredict(systemText, frames, statusDiv) {
       }
     }
 
+    function preferGoogleDriveSaves() {
+      // Use Drive whenever connected (user preference) unless explicitly set to local
+      if ((appConfig.downloadTarget || "local") === "local" && !isGoogleSignedIn()) return false;
+      if ((appConfig.downloadTarget || "local") === "local") return false;
+      return true;
+    }
+    function preferGoogleDriveWhenConnected() {
+      // Stronger rule for Save/exports: if signed in, prefer Drive
+      return isGoogleSignedIn() || (appConfig.downloadTarget === "drive");
+    }
+    function getDriveFolderForPurpose(purpose) {
+      if (purpose === "exports") {
+        return {
+          id: (appConfig.googleDriveExportsFolderId || appConfig.googleDriveFolderId || "").trim(),
+          name: appConfig.googleDriveExportsFolderName || appConfig.googleDriveFolderName || "Drive folder"
+        };
+      }
+      return {
+        id: (appConfig.googleDriveFolderId || "").trim(),
+        name: appConfig.googleDriveFolderName || "Backups"
+      };
+    }
+    async function uploadBlobToGoogleDrive(folderId, filename, blob, mimeType) {
+      if (!folderId) throw new Error("No Google Drive folder selected.");
+      const token = await ensureGoogleToken();
+      const metadata = {
+        name: filename,
+        mimeType: mimeType || blob.type || "application/octet-stream",
+        parents: [folderId]
+      };
+      const boundary = "sw_boundary_" + Date.now();
+      const metaPart = JSON.stringify(metadata);
+      // Build multipart body as Blob so large backups don't blow string limits
+      const parts = [
+        "--" + boundary + "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" + metaPart + "\r\n",
+        "--" + boundary + "\r\nContent-Type: " + (mimeType || blob.type || "application/octet-stream") + "\r\n\r\n",
+        blob,
+        "\r\n--" + boundary + "--"
+      ];
+      const body = new Blob(parts, { type: "multipart/related; boundary=" + boundary });
+      const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + token
+          // Do NOT set Content-Type manually when body is Blob — browser sets boundary
+        },
+        body
+      });
+      if (!res.ok) {
+        const raw = await res.text();
+        throw new Error(formatGoogleApiError(raw));
+      }
+      return res.json();
+    }
+    async function uploadTextToGoogleDrive(folderId, filename, text, mimeType) {
+      const mime = mimeType || "application/json";
+      const blob = new Blob([text], { type: mime });
+      return uploadBlobToGoogleDrive(folderId, filename, blob, mime);
+    }
+    async function downloadOrDriveExport(filename, textOrBlob, mime, purpose) {
+      purpose = purpose === "backup" ? "backup" : "exports";
+      const useDrive = preferGoogleDriveWhenConnected();
+      if (useDrive) {
+        try {
+          if (!isGoogleSignedIn()) await connectGoogleDrive();
+          let folder = getDriveFolderForPurpose(purpose);
+          if (!folder.id) {
+            await pickGoogleDriveFolder(purpose === "backup" ? "backup" : "exports");
+            folder = getDriveFolderForPurpose(purpose);
+          }
+          if (!folder.id) throw new Error("No Drive folder selected for " + purpose + ".");
+          const blob = (textOrBlob instanceof Blob)
+            ? textOrBlob
+            : new Blob([textOrBlob], { type: mime || "application/json" });
+          const file = await uploadBlobToGoogleDrive(folder.id, filename, blob, mime || blob.type || "application/json");
+          toast("Saved to Google Drive (" + folder.name + "): " + (file.name || filename), "success", 6000);
+          return { target: "drive", file };
+        } catch (e) {
+          const msg = formatGoogleApiError(e && e.message ? e.message : e);
+          toast("Drive export failed: " + msg + "\n\nFalling back to local download.", "error", 60000);
+          // fall through to local
+        }
+      }
+      const blob = (textOrBlob instanceof Blob)
+        ? textOrBlob
+        : new Blob([textOrBlob], { type: mime || "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      return { target: "local" };
+    }
     async function uploadBackupToGoogleDrive() {
       const folderId = (appConfig.googleDriveFolderId || "").trim();
       if (!folderId) {
-        toast("Choose a Google Drive folder first (Admin → Season & Storage).", "error", 5000);
-        await pickGoogleDriveFolder();
+        toast("Choose a Google Drive folder first (Admin → Season & Storage).", "error", 8000);
+        await pickGoogleDriveFolder("backup");
         if (!(appConfig.googleDriveFolderId || "").trim()) return;
       }
       const payload = buildFullBackupPayload();
       const name = "strategic-wrestler-backup_" + new Date().toISOString().replace(/[:.]/g, "-") + ".json";
-      const metadata = {
+      const file = await uploadTextToGoogleDrive(
+        (appConfig.googleDriveFolderId || "").trim(),
         name,
-        mimeType: "application/json",
-        parents: [(appConfig.googleDriveFolderId || "").trim()]
-      };
-      const boundary = "sw_boundary_" + Date.now();
-      const body =
-        "--" + boundary + "\r\n" +
-        "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
-        JSON.stringify(metadata) + "\r\n" +
-        "--" + boundary + "\r\n" +
-        "Content-Type: application/json\r\n\r\n" +
-        JSON.stringify(payload, null, 2) + "\r\n" +
-        "--" + boundary + "--";
-      const token = await ensureGoogleToken();
-      const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + token,
-          "Content-Type": "multipart/related; boundary=" + boundary
-        },
-        body
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const file = await res.json();
+        JSON.stringify(payload, null, 2),
+        "application/json"
+      );
       toast("Saved to Google Drive: " + (file.name || name), "success", 6000);
       return file;
     }
@@ -16810,15 +16991,20 @@ async function callLocalLoraPredict(systemText, frames, statusDiv) {
 
     async function saveSharedSeasonData() {
       try {
-        const preferDrive = (appConfig.downloadTarget === "drive");
-        if (!preferDrive) {
-          exportAllBackup();
-          toast("Backup downloaded to this device (download location = Hard drive).", "success");
+        // Prefer Drive when: setting is drive, OR Google is already connected
+        const wantDrive = (appConfig.downloadTarget === "drive") || isGoogleSignedIn();
+        if (!wantDrive) {
+          await downloadOrDriveExport(
+            "strategic-wrestler-backup_" + new Date().toISOString().slice(0, 10) + ".json",
+            JSON.stringify(typeof buildFullBackupPayload === "function" ? buildFullBackupPayload() : { type: "mat-scout-full-backup", version: 2, store }, null, 2),
+            "application/json",
+            "backup"
+          );
           return;
         }
         if (!googleClientId()) {
+          toast("No Google Client ID — backup downloaded locally. Set Client ID under Admin → Season & Storage.", "info", 8000);
           exportAllBackup();
-          toast("No Google Client ID — backup downloaded locally. Set Client ID under Admin → Season & Storage.", "info", 7000);
           return;
         }
         if (!isGoogleSignedIn()) {
@@ -16826,22 +17012,24 @@ async function callLocalLoraPredict(systemText, frames, statusDiv) {
         }
         if (isGoogleSignedIn()) {
           if (!(appConfig.googleDriveFolderId || "").trim()) {
-            toast("Choose a Backups folder first.", "info", 4000);
+            toast("Choose a Backups folder first.", "info", 5000);
             await pickGoogleDriveFolder("backup");
             if (!(appConfig.googleDriveFolderId || "").trim()) {
+              toast("No backups folder — downloading locally instead.", "info", 6000);
               exportAllBackup();
-              toast("No backups folder — downloaded locally instead.", "info", 5000);
               return;
             }
           }
           await uploadBackupToGoogleDrive();
-          toast("Backup saved to Google Drive (" + (appConfig.googleDriveFolderName || "Backups") + ").", "success", 5000);
           return;
         }
-        exportAllBackup();
         toast("Google not connected — backup downloaded to this device.", "info", 6000);
+        exportAllBackup();
       } catch (e) {
-        toast("Drive save failed: " + (e.message || e) + " — downloading locally.", "error", 7000);
+        const msg = (typeof formatGoogleApiError === "function")
+          ? formatGoogleApiError(e && e.message ? e.message : e)
+          : String(e && e.message ? e.message : e);
+        toast("Drive save failed:\n" + msg + "\n\nDownloading a local copy as fallback.", "error", 60000);
         try { exportAllBackup(); } catch (e2) {}
       }
     }
