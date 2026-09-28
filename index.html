@@ -1764,16 +1764,24 @@
       /** Attendance rate: how many lates equal one absence-equivalent (never double-counts as Abs). 0 = lates ignored in rate. */
       latesPerAbsence: 2,
       includeExcusedInAttendanceRate: false,
-      cloudSyncUrl: "",
       googleClientId: "",
       googleDriveFolderId: "",
       googleDriveFolderName: "",
       /** Separate Drive folder for exports (MatSide packages, CSV, etc.) */
       googleDriveExportsFolderId: "",
       googleDriveExportsFolderName: "",
+      /** Season archive JSON files */
+      googleDriveArchivesFolderId: "",
+      googleDriveArchivesFolderName: "",
+      /** AI training library JSON / Kaggle exports */
+      googleDriveAiLibraryFolderId: "",
+      googleDriveAiLibraryFolderName: "",
+      /** MatSide score packages + match videos */
+      googleDriveMatSideFolderId: "",
+      googleDriveMatSideFolderName: "",
       /** Preferred Gemini model id (tried first) */
       preferredAiModel: "gemini-3.6-flash",
-      downloadTarget: "local", // local | drive
+      downloadTarget: "drive", // local | drive — prefer Drive when connected
       includeForfeitsInWinPct: false,
 
       countLatesInAttendanceRate: true,
@@ -2731,6 +2739,14 @@
 
     function triggerImportMatSidePackage() {
       if (guardSeasonLocked("importing MatSide packages")) return;
+      const handleData = (data) => {
+        try { importMatSidePackage(data); }
+        catch (err) { toast("Could not import MatSide package: " + (err.message || err), "error"); }
+      };
+      if (typeof importJsonFromDriveOrFile === "function") {
+        importJsonFromDriveOrFile("matside", "MatSide package", handleData);
+        return;
+      }
       const input = document.createElement("input");
       input.type = "file";
       input.accept = "application/json,.json";
@@ -2739,12 +2755,8 @@
         if (!file) return;
         const reader = new FileReader();
         reader.onload = () => {
-          try {
-            const data = JSON.parse(reader.result);
-            importMatSidePackage(data);
-          } catch (err) {
-            toast("Could not import MatSide package: " + (err.message || err));
-          }
+          try { handleData(JSON.parse(reader.result)); }
+          catch (err) { toast("Could not import MatSide package: " + (err.message || err)); }
         };
         reader.readAsText(file);
       };
@@ -2757,50 +2769,53 @@
       return (i > 0 ? s.slice(0, i) : s).toLowerCase();
     }
 
+    function applyMatSideVideoFile(file) {
+      if (!file) return;
+      const expected = pendingMatSidePackage && pendingMatSidePackage.expectedVideoName || "";
+      const chosen = file.name || "";
+      if (expected && fileBaseName(expected) && fileBaseName(chosen) !== fileBaseName(expected)) {
+        const ok = confirm(
+          "Video filename does not match the MatSide package.\n\n" +
+          "Expected: " + expected + "\n" +
+          "Selected: " + chosen + "\n\n" +
+          "MatSide uses the same base name for JSON and video. Continue with this video anyway?"
+        );
+        if (!ok) return;
+      }
+      videoSourceType = "file";
+      selectedVideoFile = file;
+      videoFileName = file.name || "mat-side-video";
+      if (videoBlobUrl) {
+        try { URL.revokeObjectURL(videoBlobUrl); } catch (e) {}
+      }
+      videoBlobUrl = URL.createObjectURL(file);
+      youtubeVideoId = null;
+      const season = getActiveSeason();
+      const m = (season.matches || []).find(x => x.id === pendingMatSidePackage.matchId);
+      if (m) {
+        m.video = { type: "file", fileName: videoFileName, source: "mat-side", hasLocalBlob: true };
+      }
+      if (activeMatch && activeMatch.id === pendingMatSidePackage.matchId) {
+        activeMatch.videoFileName = videoFileName;
+      }
+      try { persist(); } catch (e) {}
+      render();
+      toast("Video attached for Scout review.", "success");
+    }
     function triggerAttachMatSideVideo() {
       if (!pendingMatSidePackage || !pendingMatSidePackage.matchId) {
         return toast("Import a MatSide score JSON first, then attach the video.");
+      }
+      if (typeof importVideoFromDriveOrFile === "function") {
+        importVideoFromDriveOrFile("matside", pendingMatSidePackage.expectedVideoName || "", applyMatSideVideoFile);
+        return;
       }
       const input = document.createElement("input");
       input.type = "file";
       input.accept = "video/*,.mp4,.webm,.mov";
       input.onchange = () => {
-        const file = input.files && input.files[0];
-        if (!file) return;
-        try {
-          const expected = pendingMatSidePackage.expectedVideoName || "";
-          const chosen = file.name || "";
-          if (expected && fileBaseName(expected) && fileBaseName(chosen) !== fileBaseName(expected)) {
-            const ok = confirm(
-              "Video filename does not match the MatSide package.\n\n" +
-              "Expected: " + expected + "\n" +
-              "Selected: " + chosen + "\n\n" +
-              "MatSide uses the same base name for JSON and video. Continue with this video anyway?"
-            );
-            if (!ok) return;
-          }
-          videoSourceType = "file";
-          selectedVideoFile = file;
-          videoFileName = file.name || "mat-side-video";
-          if (videoBlobUrl) {
-            try { URL.revokeObjectURL(videoBlobUrl); } catch (e) {}
-          }
-          videoBlobUrl = URL.createObjectURL(file);
-          youtubeVideoId = null;
-          const season = getActiveSeason();
-          const m = (season.matches || []).find(x => x.id === pendingMatSidePackage.matchId);
-          if (m) {
-            m.video = { type: "file", fileName: videoFileName, source: "mat-side", hasLocalBlob: true };
-          }
-          if (activeMatch && activeMatch.id === pendingMatSidePackage.matchId) {
-            activeMatch.videoFileName = videoFileName;
-          }
-          try { persist(); } catch (e) {}
-          render();
-          toast("Video attached for Scout review.");
-        } catch (err) {
-          toast("Could not load video: " + (err.message || err));
-        }
+        try { applyMatSideVideoFile(input.files && input.files[0]); }
+        catch (err) { toast("Could not load video: " + (err.message || err)); }
       };
       input.click();
     }
@@ -3430,21 +3445,25 @@
         version: 1,
         exportedAt: new Date().toISOString(),
         season: JSON.parse(JSON.stringify(season)),
-        // HOF stays global; include assignment context for reference only
         awardsSnapshot: JSON.parse(JSON.stringify(awards || []))
       };
       const safeName = String(season.name || "season").replace(/[^a-z0-9-_]+/gi, "_").slice(0, 40);
       const fname = `mat-scout-archive_${safeName}_${getSeasonYearLabelSafe(season)}.json`;
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const body = JSON.stringify(payload, null, 2);
+      if (typeof downloadOrDriveExport === "function") {
+        downloadOrDriveExport(fname, body, "application/json", "archives").then(r => {
+          if (r && r.target === "drive") toast(`Archived "${season.name}" to Google Drive:\n${fname}`, "success", 5000);
+          else toast(`Archived "${season.name}" locally:\n${fname}\nKeep this file to reload later.`, "success", 6000);
+        });
+        return;
+      }
+      const blob = new Blob([body], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = fname;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      a.href = url; a.download = fname;
+      document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-      toast(`Archived "${season.name}" to download folder:\n${fname}\n\n(Browsers may flatten the path; move the file into Strategic Wrestler → Seasons if needed.)\nKeep this file to reload the season later.`);
+      toast(`Archived "${season.name}" to download folder:\n${fname}`);
     }
 
     function archiveActiveSeason() {
@@ -3540,6 +3559,14 @@
     }
 
     function triggerLoadSeasonArchive() {
+      if (typeof importJsonFromDriveOrFile === "function") {
+        importJsonFromDriveOrFile("archives", "season archive", (data) => {
+          const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+          const file = new File([blob], "drive-season-archive.json", { type: "application/json" });
+          loadSeasonArchiveFromFile(file);
+        });
+        return;
+      }
       const input = document.createElement("input");
       input.type = "file";
       input.accept = "application/json,.json";
@@ -8412,7 +8439,12 @@
         count: aiTrainingLibrary.length,
         examples: aiTrainingLibrary
       };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const body = JSON.stringify(payload, null, 2);
+      if (typeof downloadOrDriveExport === "function") {
+        downloadOrDriveExport("mat-scout-ai-training-library.json", body, "application/json", "aiLibrary");
+        return;
+      }
+      const blob = new Blob([body], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -8423,9 +8455,9 @@
       URL.revokeObjectURL(url);
     }
 
-    function downloadTextFile(filename, text, mime) {
+    function downloadTextFile(filename, text, mime, purpose) {
       if (typeof downloadOrDriveExport === "function") {
-        downloadOrDriveExport(filename, text, mime || "text/plain", "exports");
+        downloadOrDriveExport(filename, text, mime || "text/plain", purpose || "exports");
         return;
       }
       const blob = new Blob([text], { type: mime || "text/plain" });
@@ -8704,10 +8736,10 @@
       const matchCols = ["match_id","match_index","saved_at","season_name","wrestler_name","weight_class","division","opponent","level","date","source","pov","ankle_band","singlet_color","singlet_secondary","appearance_notes","our_appearance_text","result_our_points","result_opp_points","result_outcome","result_method","event_count","video_type","video_file_name","video_has_local_blob","youtube_id","youtube_url"];
       const matchesCsv = [matchCols.join(",")].concat(matches.map(r => matchCols.map(c => csvEscape(r[c])).join(","))).join("\n");
       const readme = `Strategic Wrestler Kaggle Dataset\nExported: ${exportedAt}\nMatches: ${matches.length}\nEvents: ${eventRows.length}\n\nPOV: our_wrestler (offense = us, defense = faced).\nAppearance columns: ankle_band, singlet_color.\nVideos: place files in videos/ named video_file_name, or use youtube_id.\nPrimary table: mat-scout-kaggle-events.csv\n`;
-      downloadTextFile("mat-scout-kaggle-dataset.json", JSON.stringify(dataset, null, 2), "application/json");
-      setTimeout(() => downloadTextFile("mat-scout-kaggle-events.csv", eventsCsv, "text/csv"), 400);
-      setTimeout(() => downloadTextFile("mat-scout-kaggle-matches.csv", matchesCsv, "text/csv"), 800);
-      setTimeout(() => downloadTextFile("mat-scout-kaggle-README.txt", readme, "text/plain"), 1200);
+      downloadTextFile("mat-scout-kaggle-dataset.json", JSON.stringify(dataset, null, 2), "application/json", "aiLibrary");
+      setTimeout(() => downloadTextFile("mat-scout-kaggle-events.csv", eventsCsv, "text/csv", "aiLibrary"), 400);
+      setTimeout(() => downloadTextFile("mat-scout-kaggle-matches.csv", matchesCsv, "text/csv", "aiLibrary"), 800);
+      setTimeout(() => downloadTextFile("mat-scout-kaggle-README.txt", readme, "text/plain", "aiLibrary"), 1200);
       toast("Kaggle export started (" + matches.length + " matches, " + eventRows.length + " events). Upload videos separately.");
     }
 
@@ -8743,6 +8775,29 @@
     }
 
     function triggerImportAiTrainingLibrary() {
+      if (typeof importJsonFromDriveOrFile === "function") {
+        importJsonFromDriveOrFile("aiLibrary", "AI training library", (data) => {
+          let examples = Array.isArray(data) ? data : (Array.isArray(data.examples) ? data.examples : null);
+          if (!examples) throw new Error("Expected library export with examples array.");
+          let added = 0;
+          examples.forEach(ex => {
+            if (!ex || typeof ex !== "object") return;
+            const copy = JSON.parse(JSON.stringify(ex));
+            copy.id = makeId("id");
+            if (copy.video && copy.video.type === "file") {
+              copy.video.hasLocalBlob = false;
+              copy.video.note = (copy.video.note || "") + " Imported without local video blob.";
+            }
+            if (!copy.savedAt) copy.savedAt = new Date().toISOString();
+            aiTrainingLibrary.push(copy);
+            added++;
+          });
+          persist();
+          render();
+          toast("Imported " + added + " example(s). Library size: " + aiTrainingLibrary.length, "success");
+        });
+        return;
+      }
       const input = document.createElement("input");
       input.type = "file"; input.accept = "application/json,.json";
       input.onchange = () => { if (input.files && input.files[0]) importAiTrainingLibraryFromFile(input.files[0]); };
@@ -13054,25 +13109,47 @@ const teamOpsBody = `
             <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
               <button type="button" class="btn btn-green" style="font-size:11px;" onclick="connectGoogleDrive()">Connect Google</button>
               <button type="button" class="btn" style="font-size:11px; background:var(--panelLine); color:var(--chalk);" onclick="disconnectGoogleDrive()">Disconnect</button>
+            </div>
+            <label class="field-label">Default download location</label>
+            <select class="select" style="margin-bottom:10px;" onchange="appConfig.downloadTarget = this.value; persist(); toast(this.value === 'drive' ? 'Saves/exports prefer Google Drive when connected.' : 'Saves/exports download to this computer.', 'info', 4000);">
+              <option value="drive" ${(appConfig.downloadTarget || 'drive') === 'drive' ? 'selected' : ''}>Google Drive (when connected)</option>
+              <option value="local" ${appConfig.downloadTarget === 'local' ? 'selected' : ''}>Hard drive (browser download)</option>
+            </select>
+            <div class="sub-label" style="margin-bottom:6px;">Drive folders</div>
+            <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
               <button type="button" class="btn btn-gold" style="font-size:11px;" onclick="pickGoogleDriveFolder('backup')">Backups folder</button>
               <button type="button" class="btn btn-gold" style="font-size:11px;" onclick="pickGoogleDriveFolder('exports')">Exports folder</button>
+              <button type="button" class="btn btn-gold" style="font-size:11px;" onclick="pickGoogleDriveFolder('archives')">Season Archives folder</button>
+              <button type="button" class="btn btn-gold" style="font-size:11px;" onclick="pickGoogleDriveFolder('aiLibrary')">AI Library folder</button>
+              <button type="button" class="btn btn-gold" style="font-size:11px;" onclick="pickGoogleDriveFolder('matside')">MatSide folder</button>
             </div>
-            <p style="font-size:10px; color:var(--muted); margin:0 0 6px 0;">
-              <strong style="color:var(--gold);">Save / Backups:</strong>
+            <p style="font-size:10px; color:var(--muted); margin:0 0 4px 0;">
+              <strong style="color:var(--gold);">Backups:</strong>
               <strong style="color:var(--chalk);">${appConfig.googleDriveFolderName || "Not set"}</strong>
-              ${appConfig.googleDriveFolderId ? " <span style=\"opacity:0.7\">(" + appConfig.googleDriveFolderId + ")</span>" : ""}
+              <span style="opacity:0.7;"> — top-bar Save / Export Full Backup / Load</span>
             </p>
-            <p style="font-size:10px; color:var(--muted); margin:0 0 8px 0;">
+            <p style="font-size:10px; color:var(--muted); margin:0 0 4px 0;">
               <strong style="color:var(--gold);">Exports:</strong>
               <strong style="color:var(--chalk);">${appConfig.googleDriveExportsFolderName || "Not set"}</strong>
-              ${appConfig.googleDriveExportsFolderId ? " <span style=\"opacity:0.7\">(" + appConfig.googleDriveExportsFolderId + ")</span>" : ""}
+              <span style="opacity:0.7;"> — MatSide export, CSV / text downloads</span>
             </p>
-            <p style="font-size:10px; color:var(--muted); margin:0;">
-              Top-bar <strong>Save</strong> uploads into the Backups folder when Google is connected.
-              <strong>Load</strong> lists those backups. Use a separate Exports folder for MatSide/CSV exports.
+            <p style="font-size:10px; color:var(--muted); margin:0 0 4px 0;">
+              <strong style="color:var(--gold);">Season Archives:</strong>
+              <strong style="color:var(--chalk);">${appConfig.googleDriveArchivesFolderName || "Not set"}</strong>
+              <span style="opacity:0.7;"> — Archive season / Load Season from File</span>
+            </p>
+            <p style="font-size:10px; color:var(--muted); margin:0 0 4px 0;">
+              <strong style="color:var(--gold);">AI Library:</strong>
+              <strong style="color:var(--chalk);">${appConfig.googleDriveAiLibraryFolderName || "Not set"}</strong>
+              <span style="opacity:0.7;"> — Export / Import Library JSON &amp; Kaggle</span>
             </p>
             <p style="font-size:10px; color:var(--muted); margin:0 0 8px 0;">
-              Set <strong>Default download location</strong> below to <strong>Google Drive</strong> so top-bar Save, full backups, MatSide, and text exports upload instead of downloading.
+              <strong style="color:var(--gold);">MatSide:</strong>
+              <strong style="color:var(--chalk);">${appConfig.googleDriveMatSideFolderName || "Not set"}</strong>
+              <span style="opacity:0.7;"> — Import MatSide JSON &amp; Attach video</span>
+            </p>
+            <p style="font-size:10px; color:var(--muted); margin:0 0 8px 0;">
+              Unset folders fall back to Exports, then Backups. Share folders with every coach (Editor). Same Client ID + Connect once per browser.
             </p>
             ${(function(){
               let err = "";
@@ -13086,12 +13163,6 @@ const teamOpsBody = `
                 '<button type="button" class="btn btn-toolbar" style="background:var(--panelLine);color:var(--chalk);" onclick="lastDriveError=\'\';try{localStorage.removeItem(\'mat-scout-last-drive-error\');}catch(e){}render();">Clear</button>' +
                 '</div></div>';
             })()}
-            <p style="font-size:10px; color:var(--muted); margin:0 0 8px 0;">
-              Share both folders with every coach (Editor). Same Client ID + Connect Google once per browser.
-            </p>
-            <label class="field-label" style="margin-top:10px;">Optional folder link (bookmark only)</label>
-            <input class="input" style="margin-bottom:0;" placeholder="https://drive.google.com/drive/folders/..." value="${appConfig.cloudSyncUrl || ''}"
-              onchange="appConfig.cloudSyncUrl = this.value.trim(); persist();" />
           </div>
           <button class="btn btn-green" style="font-size:11px;" onclick="triggerLoadSeasonArchive()">Load Season from File</button>
           <button class="btn btn-gold" style="font-size:11px;" onclick="exportMatSideSync()">Export for MatSide</button>
@@ -13170,16 +13241,6 @@ const teamOpsBody = `
           }"
           onchange="(function(v){ const b=aiAnalysisBackend; if(b==='openai') localStorage.setItem(OPENAI_API_KEY_STORAGE,v); else if(b==='anthropic') localStorage.setItem(ANTHROPIC_API_KEY_STORAGE,v); else if(b==='xai') localStorage.setItem(XAI_API_KEY_STORAGE,v); else localStorage.setItem(API_KEY_STORAGE,v); toast('API key saved on this browser.','success'); })(this.value.trim());" />
         `}
-        <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--panelLine);">
-          <label class="field-label">Default download location</label>
-          <select class="select" onchange="appConfig.downloadTarget = this.value; persist(); toast(this.value === 'drive' ? 'Saves/exports will prefer Google Drive when connected.' : 'Saves/exports will download to this computer.', 'info', 4000);">
-            <option value="local" ${(appConfig.downloadTarget || 'local') === 'local' ? 'selected' : ''}>Hard drive (browser download)</option>
-            <option value="drive" ${appConfig.downloadTarget === 'drive' ? 'selected' : ''}>Google Drive (when connected)</option>
-          </select>
-          <p style="font-size:10px; color:var(--muted); margin:0;">
-            Save/backups use the Backups folder when Drive is selected and connected; otherwise files download to your computer.
-          </p>
-        </div>
       `;
 
 const aiBody = `
@@ -13555,6 +13616,8 @@ const aiBody = `
       const storageBody = `
         <p style="font-size:11px; color:var(--muted); margin:0 0 10px 0;">
           Browser local storage holds seasons, taxonomy, awards, and training metadata. Video blobs in IndexedDB are separate.
+          <br/><strong style="color:var(--gold);">Export Full Backup</strong> is the same full JSON as top-bar <strong>Save</strong> (all seasons, settings, libraries) — it uses the Backups Drive folder when connected.
+          <strong>Validate Backup File</strong> checks a backup JSON without loading it. <strong>Refresh Status</strong> recalculates storage use after saves/archives.
         </p>
         <div class="grid-3" style="margin-bottom:10px;">
           <div style="background:var(--mat); border:1px solid var(--panelLine); border-radius:6px; padding:10px; text-align:center;">
@@ -16774,8 +16837,15 @@ async function callLocalLoraPredict(systemText, frames, statusDiv) {
     }
 
     async function pickGoogleDriveFolder(purpose) {
-      purpose = purpose === "exports" ? "exports" : "backup";
-      const label = purpose === "exports" ? "Exports" : "Save / Backups";
+      const purposeMap = {
+        exports: "Exports",
+        archives: "Season Archives",
+        aiLibrary: "AI Training Library",
+        matside: "MatSide packages / videos",
+        backup: "Save / Backups"
+      };
+      if (!purposeMap[purpose]) purpose = "backup";
+      const label = purposeMap[purpose];
       try {
         await ensureGoogleToken();
         await new Promise((resolve, reject) => {
@@ -16801,6 +16871,15 @@ async function callLocalLoraPredict(systemText, frames, statusDiv) {
                 if (purpose === "exports") {
                   appConfig.googleDriveExportsFolderId = doc.id;
                   appConfig.googleDriveExportsFolderName = doc.name || "Exports folder";
+                } else if (purpose === "archives") {
+                  appConfig.googleDriveArchivesFolderId = doc.id;
+                  appConfig.googleDriveArchivesFolderName = doc.name || "Archives folder";
+                } else if (purpose === "aiLibrary") {
+                  appConfig.googleDriveAiLibraryFolderId = doc.id;
+                  appConfig.googleDriveAiLibraryFolderName = doc.name || "AI Library folder";
+                } else if (purpose === "matside") {
+                  appConfig.googleDriveMatSideFolderId = doc.id;
+                  appConfig.googleDriveMatSideFolderName = doc.name || "MatSide folder";
                 } else {
                   appConfig.googleDriveFolderId = doc.id;
                   appConfig.googleDriveFolderName = doc.name || "Backup folder";
@@ -16820,14 +16899,25 @@ async function callLocalLoraPredict(systemText, frames, statusDiv) {
         const id = prompt(
           "Google Picker unavailable. Paste a Google Drive FOLDER id for " + label + "\n" +
           "(from the folder URL: .../folders/THIS_PART)",
-          purpose === "exports"
-            ? (appConfig.googleDriveExportsFolderId || "")
-            : (appConfig.googleDriveFolderId || "")
+          purpose === "exports" ? (appConfig.googleDriveExportsFolderId || "") :
+          purpose === "archives" ? (appConfig.googleDriveArchivesFolderId || "") :
+          purpose === "aiLibrary" ? (appConfig.googleDriveAiLibraryFolderId || "") :
+          purpose === "matside" ? (appConfig.googleDriveMatSideFolderId || "") :
+          (appConfig.googleDriveFolderId || "")
         );
         if (!id) return null;
         if (purpose === "exports") {
           appConfig.googleDriveExportsFolderId = id.trim();
           appConfig.googleDriveExportsFolderName = "Exports folder";
+        } else if (purpose === "archives") {
+          appConfig.googleDriveArchivesFolderId = id.trim();
+          appConfig.googleDriveArchivesFolderName = "Archives folder";
+        } else if (purpose === "aiLibrary") {
+          appConfig.googleDriveAiLibraryFolderId = id.trim();
+          appConfig.googleDriveAiLibraryFolderName = "AI Library folder";
+        } else if (purpose === "matside") {
+          appConfig.googleDriveMatSideFolderId = id.trim();
+          appConfig.googleDriveMatSideFolderName = "MatSide folder";
         } else {
           appConfig.googleDriveFolderId = id.trim();
           appConfig.googleDriveFolderName = "Backup folder";
@@ -16850,16 +16940,33 @@ async function callLocalLoraPredict(systemText, frames, statusDiv) {
       return isGoogleSignedIn() || (appConfig.downloadTarget === "drive");
     }
     function getDriveFolderForPurpose(purpose) {
+      const fallbackId = (appConfig.googleDriveFolderId || "").trim();
+      const fallbackName = appConfig.googleDriveFolderName || "Backups";
       if (purpose === "exports") {
         return {
-          id: (appConfig.googleDriveExportsFolderId || appConfig.googleDriveFolderId || "").trim(),
-          name: appConfig.googleDriveExportsFolderName || appConfig.googleDriveFolderName || "Drive folder"
+          id: (appConfig.googleDriveExportsFolderId || fallbackId).trim(),
+          name: appConfig.googleDriveExportsFolderName || fallbackName || "Exports"
         };
       }
-      return {
-        id: (appConfig.googleDriveFolderId || "").trim(),
-        name: appConfig.googleDriveFolderName || "Backups"
-      };
+      if (purpose === "archives") {
+        return {
+          id: (appConfig.googleDriveArchivesFolderId || appConfig.googleDriveExportsFolderId || fallbackId).trim(),
+          name: appConfig.googleDriveArchivesFolderName || appConfig.googleDriveExportsFolderName || fallbackName || "Archives"
+        };
+      }
+      if (purpose === "aiLibrary") {
+        return {
+          id: (appConfig.googleDriveAiLibraryFolderId || appConfig.googleDriveExportsFolderId || fallbackId).trim(),
+          name: appConfig.googleDriveAiLibraryFolderName || appConfig.googleDriveExportsFolderName || fallbackName || "AI Library"
+        };
+      }
+      if (purpose === "matside") {
+        return {
+          id: (appConfig.googleDriveMatSideFolderId || appConfig.googleDriveExportsFolderId || fallbackId).trim(),
+          name: appConfig.googleDriveMatSideFolderName || appConfig.googleDriveExportsFolderName || fallbackName || "MatSide"
+        };
+      }
+      return { id: fallbackId, name: fallbackName };
     }
     async function uploadBlobToGoogleDrive(folderId, filename, blob, mimeType) {
       if (!folderId) throw new Error("No Google Drive folder selected.");
@@ -16933,6 +17040,173 @@ async function callLocalLoraPredict(systemText, frames, statusDiv) {
       URL.revokeObjectURL(url);
       return { target: "local" };
     }
+    async function listDriveFilesInFolder(folderId, opts) {
+      opts = opts || {};
+      if (!folderId) throw new Error("No Drive folder selected.");
+      let q = "'" + folderId + "' in parents and trashed = false";
+      if (opts.mimeContains) q += " and mimeType contains '" + opts.mimeContains + "'";
+      if (opts.nameContains) q += " and name contains '" + String(opts.nameContains).replace(/'/g, "\\'") + "'";
+      if (opts.mimeType) q += " and mimeType = '" + opts.mimeType + "'";
+      const res = await driveFetch(
+        "/files?q=" + encodeURIComponent(q) +
+        "&orderBy=modifiedTime desc&pageSize=" + (opts.pageSize || 20) +
+        "&fields=files(id,name,modifiedTime,size,mimeType)"
+      );
+      const data = await res.json();
+      return data.files || [];
+    }
+    async function downloadDriveFileBlob(fileId, mimeHint) {
+      const res = await driveFetch("/files/" + encodeURIComponent(fileId) + "?alt=media");
+      const blob = await res.blob();
+      return blob;
+    }
+    async function downloadDriveFileJsonById(fileId) {
+      const res = await driveFetch("/files/" + encodeURIComponent(fileId) + "?alt=media");
+      return res.json();
+    }
+    function pickLocalJsonFile(onData) {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".json,application/json";
+      input.onchange = async () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        try {
+          const data = JSON.parse(await file.text());
+          onData(data, file);
+        } catch (e) {
+          toast("Could not read JSON: " + (e.message || e), "error", 8000);
+        }
+      };
+      input.click();
+    }
+    function pickLocalVideoFile(onFile) {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "video/*,.mp4,.webm,.mov";
+      input.onchange = () => {
+        const file = input.files && input.files[0];
+        if (file) onFile(file);
+      };
+      input.click();
+    }
+    /** When Drive is preferred/connected, list JSON in the purpose folder; otherwise local file picker. */
+    async function importJsonFromDriveOrFile(purpose, label, onData) {
+      const useDrive = typeof preferGoogleDriveWhenConnected === "function" && preferGoogleDriveWhenConnected();
+      if (!useDrive || !isGoogleSignedIn()) {
+        pickLocalJsonFile((data) => onData(data));
+        return;
+      }
+      try {
+        if (!isGoogleSignedIn()) await connectGoogleDrive();
+        let folder = getDriveFolderForPurpose(purpose);
+        if (!folder.id) {
+          await pickGoogleDriveFolder(purpose);
+          folder = getDriveFolderForPurpose(purpose);
+        }
+        if (!folder.id) {
+          toast("No Drive folder for " + label + " — using local file.", "info", 5000);
+          pickLocalJsonFile((data) => onData(data));
+          return;
+        }
+        const files = await listDriveFilesInFolder(folder.id, { mimeType: "application/json", pageSize: 20 });
+        // also allow generic files whose name ends with .json
+        const extra = await listDriveFilesInFolder(folder.id, { pageSize: 20 });
+        const seen = new Set(files.map(f => f.id));
+        extra.forEach(f => {
+          if (!seen.has(f.id) && /\.json$/i.test(f.name || "")) files.push(f);
+        });
+        if (!files.length) {
+          const goLocal = confirm("No JSON files found in Drive folder \"" + folder.name + "\".\n\nPick a local file instead?");
+          if (goLocal) pickLocalJsonFile((data) => onData(data));
+          return;
+        }
+        const lines = files.map((f, i) =>
+          (i + 1) + ". " + f.name + (f.modifiedTime ? " (" + new Date(f.modifiedTime).toLocaleString() + ")" : "")
+        );
+        const pick = prompt(
+          label + " files in \"" + folder.name + "\" (newest first):\n\n" + lines.join("\n") +
+          "\n\nEnter number to load, or 0 for a local file:",
+          "1"
+        );
+        if (pick == null) return;
+        const n = parseInt(pick, 10);
+        if (!n) {
+          pickLocalJsonFile((data) => onData(data));
+          return;
+        }
+        const file = files[Math.min(Math.max(1, n), files.length) - 1];
+        toast("Loading " + file.name + " from Drive…", "info", 3000);
+        const data = await downloadDriveFileJsonById(file.id);
+        onData(data);
+      } catch (e) {
+        const msg = (typeof formatGoogleApiError === "function") ? formatGoogleApiError(e.message || e) : String(e.message || e);
+        toast("Drive import failed: " + msg + "\n\nFalling back to local file.", "error", 20000);
+        pickLocalJsonFile((data) => onData(data));
+      }
+    }
+    async function importVideoFromDriveOrFile(purpose, expectedName, onFile) {
+      const useDrive = typeof preferGoogleDriveWhenConnected === "function" && preferGoogleDriveWhenConnected();
+      if (!useDrive || !isGoogleSignedIn()) {
+        pickLocalVideoFile(onFile);
+        return;
+      }
+      try {
+        if (!isGoogleSignedIn()) await connectGoogleDrive();
+        let folder = getDriveFolderForPurpose(purpose);
+        if (!folder.id) {
+          await pickGoogleDriveFolder(purpose);
+          folder = getDriveFolderForPurpose(purpose);
+        }
+        if (!folder.id) {
+          pickLocalVideoFile(onFile);
+          return;
+        }
+        const files = await listDriveFilesInFolder(folder.id, { mimeContains: "video/", pageSize: 25 });
+        // also catch .mp4 etc without video mime
+        const extra = await listDriveFilesInFolder(folder.id, { pageSize: 25 });
+        const seen = new Set(files.map(f => f.id));
+        extra.forEach(f => {
+          if (!seen.has(f.id) && /\.(mp4|webm|mov|m4v)$/i.test(f.name || "")) files.push(f);
+        });
+        if (!files.length) {
+          const goLocal = confirm("No videos found in Drive folder \"" + folder.name + "\".\n\nPick a local video instead?");
+          if (goLocal) pickLocalVideoFile(onFile);
+          return;
+        }
+        // Prefer matching expected base name
+        let defaultIdx = 1;
+        if (expectedName) {
+          const base = String(expectedName).replace(/\.[a-z0-9]+$/i, "").toLowerCase();
+          const hit = files.findIndex(f => (f.name || "").toLowerCase().replace(/\.[a-z0-9]+$/i, "") === base);
+          if (hit >= 0) defaultIdx = hit + 1;
+        }
+        const lines = files.map((f, i) =>
+          (i + 1) + ". " + f.name + (f.modifiedTime ? " (" + new Date(f.modifiedTime).toLocaleString() + ")" : "")
+        );
+        const pick = prompt(
+          "Videos in \"" + folder.name + "\":\n\n" + lines.join("\n") +
+          "\n\nEnter number to attach, or 0 for a local file:",
+          String(defaultIdx)
+        );
+        if (pick == null) return;
+        const n = parseInt(pick, 10);
+        if (!n) {
+          pickLocalVideoFile(onFile);
+          return;
+        }
+        const meta = files[Math.min(Math.max(1, n), files.length) - 1];
+        toast("Downloading " + meta.name + " from Drive…", "info", 4000);
+        const blob = await downloadDriveFileBlob(meta.id);
+        const file = new File([blob], meta.name || "drive-video.mp4", { type: blob.type || "video/mp4" });
+        onFile(file);
+      } catch (e) {
+        const msg = (typeof formatGoogleApiError === "function") ? formatGoogleApiError(e.message || e) : String(e.message || e);
+        toast("Drive video load failed: " + msg + "\n\nFalling back to local file.", "error", 20000);
+        pickLocalVideoFile(onFile);
+      }
+    }
+
     async function uploadBackupToGoogleDrive() {
       const folderId = (appConfig.googleDriveFolderId || "").trim();
       if (!folderId) {
