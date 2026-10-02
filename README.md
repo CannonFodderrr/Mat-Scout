@@ -1,5 +1,5 @@
 # Strategic Wrestler
-https://cannonfodderrr.github.io/Mat-Scout/
+https://cannonfodderrr.github.io/Strategic-Wrestler/
 
 Wrestling Analytic and Manager App
 
